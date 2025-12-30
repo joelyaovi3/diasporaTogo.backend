@@ -27,7 +27,6 @@ import {
   getActiveSessions,
   revokeSession,
   revokeAllOtherSessions,
-  registerFree
 } from '../controllers/user.js'; 
 import { Auth } from '../middleware/user.js';
 
@@ -36,7 +35,6 @@ const router = express.Router();
 router.use(express.json());
 
 // Routes d'authentification avec Stripe
-router.post('/auth/register/free', registerFree); 
 router.post('/auth/register', register);
 router.post('/auth/verify-payment', verifyPayment);   
 router.post('/auth/login', login);

@@ -118,9 +118,21 @@ const userSchema = new mongoose.Schema({
 
 // Remplacer les deux middleware pre('save') par un seul
 userSchema.pre('save', async function(next) {
-  // Étape 1: Gérer le username
+  // Étape 1: Gérer le username - plus robuste
   if (!this.username || this.username.trim() === '') {
-    this.username = `${this.email.split('@')[0]}${Math.floor(Math.random() * 1000)}`;
+    // Extraire la partie avant @ de l'email
+    const baseUsername = this.email ? this.email.split('@')[0] : 'user';
+    // Nettoyer le username (enlever caractères spéciaux)
+    const cleanUsername = baseUsername.replace(/[^a-z0-9]/g, '');
+    // S'assurer qu'il n'est pas vide
+    const finalUsername = cleanUsername || 'user';
+    // Ajouter un suffixe aléatoire
+    this.username = `${finalUsername}${Math.floor(Math.random() * 1000)}`;
+  }
+  
+  // S'assurer que le username est en lowercase et trimmed
+  if (this.username) {
+    this.username = this.username.toLowerCase().trim();
   }
   
   // Étape 2: Vérifier l'unicité du username
@@ -132,9 +144,21 @@ userSchema.pre('save', async function(next) {
       });
       
       if (existingUser) {
-        const error = new Error('Ce nom d\'utilisateur est déjà pris');
-        error.name = 'ValidationError';
-        return next(error);
+        // Si le username existe déjà, en générer un nouveau
+        const baseUsername = this.email ? this.email.split('@')[0] : 'user';
+        const cleanUsername = baseUsername.replace(/[^a-z0-9]/g, '');
+        const finalUsername = cleanUsername || 'user';
+        this.username = `${finalUsername}${Math.floor(Math.random() * 9000 + 1000)}`;
+        
+        // Vérifier à nouveau l'unicité (récursif mais limité)
+        const checkAgain = await this.constructor.findOne({
+          username: this.username,
+          _id: { $ne: this._id }
+        });
+        
+        if (checkAgain) {
+          this.username = `${finalUsername}${Math.floor(Math.random() * 90000 + 10000)}`;
+        }
       }
     } catch (err) {
       return next(err);
@@ -152,7 +176,6 @@ userSchema.pre('save', async function(next) {
     next(error);
   }
 });
-
 // Méthodes d'instance
 userSchema.methods.comparePassword = async function(candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);

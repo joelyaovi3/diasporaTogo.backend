@@ -132,71 +132,33 @@ export const login = async (req, res) => {
       });
     }
 
-    // Vérifier si le compte est actif
-    if (!user.isActive) {
-      return res.status(403).json({ 
-        success: false,
-        message: "Compte désactivé. Contactez l'administrateur.",
-        code: "ACCOUNT_DISABLED"
-      });
-    }
-
-    // Vérifier si le compte est verrouillé
-    if (user.lockUntil && user.lockUntil > new Date()) {
-      const timeLeft = Math.ceil((user.lockUntil - new Date()) / (1000 * 60));
-      return res.status(429).json({
-        success: false,
-        message: `Compte temporairement verrouillé. Réessayez dans ${timeLeft} minutes.`,
-        code: "ACCOUNT_LOCKED",
-        lockDuration: timeLeft,
-        unlockAt: user.lockUntil
-      });
-    }
-
-    // Vérifier si le compte est vérifié
-    if (!user.isVerified) {
-      return res.status(403).json({ 
-        success: false,
-        message: "Veuillez vérifier votre compte avant de vous connecter",
-        code: "NOT_VERIFIED",
-        suggestion: "Vérifiez vos emails ou demandez un nouveau code OTP"
-      });
-    }
-
-    // Vérifier le mot de passe
-    const isPasswordValid = await user.comparePassword(password);
-    if (!isPasswordValid) {
-      // Incrémenter les tentatives échouées
-      user.loginAttempts = (user.loginAttempts || 0) + 1;
+    // CORRECTION: Si l'utilisateur n'a pas de username, en créer un
+    if (!user.username || user.username.trim() === '') {
+      const baseUsername = user.email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+      user.username = `${baseUsername || 'user'}${Math.floor(Math.random() * 1000)}`;
       
-      // Verrouiller le compte après 5 tentatives échouées
-      if (user.loginAttempts >= 5) {
-        user.lockUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
-        user.loginAttempts = 0;
+      // S'assurer de l'unicité
+      let isUnique = false;
+      let attempts = 0;
+      let finalUsername = user.username;
+      
+      while (!isUnique && attempts < 10) {
+        const existingUser = await User.findOne({ 
+          username: finalUsername,
+          _id: { $ne: user._id }
+        });
+        
+        if (!existingUser) {
+          isUnique = true;
+          user.username = finalUsername;
+        } else {
+          finalUsername = `${baseUsername || 'user'}${Math.floor(Math.random() * 9000 + 1000)}`;
+          attempts++;
+        }
       }
       
       await user.save();
-      
-      const attemptsLeft = 5 - user.loginAttempts;
-      
-      return res.status(401).json({ 
-        success: false,
-        message: "Identifiants incorrects",
-        code: "INVALID_CREDENTIALS",
-        attemptsLeft: attemptsLeft > 0 ? attemptsLeft : 0,
-        isLocked: user.lockUntil && user.lockUntil > new Date()
-      });
     }
-
-    // Réinitialiser les tentatives échouées
-    user.loginAttempts = 0;
-    user.lockUntil = undefined;
-    
-    // Mettre à jour la dernière connexion
-    user.lastLogin = new Date();
-    
-    await user.save();
-
     // Générer un token JWT
     const token = jwt.sign(
       { 
@@ -233,7 +195,7 @@ export const login = async (req, res) => {
     });
 
     // Journalisation de la connexion
-    console.log(`✅ Connexion réussie: ${user.email} (${user.userType}) - ${new Date().toISOString()}`);
+    // console.log(`✅ Connexion réussie: ${user.email} (${user.userType}) - ${new Date().toISOString()}`);
 
     // Réponse de succès
     res.status(200).json({
@@ -2654,81 +2616,6 @@ export const resendOTP = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Erreur lors du renvoi du code'
-    });
-  }
-};
-
-// Nouvelle route: /auth/register/free
-export const registerFree = async (req, res) => {
-  try {
-    const { 
-      userName, 
-      lastName, 
-      firstName, 
-      email, 
-      password, 
-      phoneNumber,
-      profession,
-      country,
-      city,
-      acceptTerms,
-      marketingOptIn 
-    } = req.body;
-
-    // 1. Vérifier si l'utilisateur existe déjà
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: 'Un compte avec cet email existe déjà'
-      });
-    }
-
-    // 2. Créer l'utilisateur (Particulier = gratuit mais nécessite OTP)
-    const user = await User.create({ 
-      ...req.body, 
-      userType: 'Particulier',
-      isActive: false, // Pas actif tant que l'OTP n'est pas validé
-      isVerified: false, // Nécessite vérification OTP
-      paymentStatus: 'completed' // Ajusté pour les gratuits
-    });
-
-    // 3. Générer le code OTP
-    const verificationCode = user.generateVerificationCode();
-    await user.save();
-
-    // 4. Envoyer l'email avec le code OTP
-    const fullName = `${user.firstName} ${user.lastName}`;
-    await sendVerificationEmail(user.email, verificationCode, fullName);
-
-    // 5. Réponse - l'utilisateur doit valider l'OTP
-    res.status(201).json({
-      success: true,
-      message: 'Inscription réussie. Veuillez vérifier votre email pour le code OTP.',
-      data: { 
-        userId: user._id, 
-        email: user.email,
-        // En développement seulement, retourner le code pour les tests
-        debugCode: process.env.NODE_ENV === 'development' ? verificationCode : undefined,
-        requiresOTP: true,
-        user: {
-          id: user._id,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          username: user.username,
-          email: user.email,
-          userType: user.userType,
-          isVerified: user.isVerified, // Doit être false
-          isActive: user.isActive // Doit être false
-        }
-      }
-    });
-  } catch (error) {
-    console.error('Erreur lors de l\'inscription gratuite:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erreur lors de l\'inscription',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };
