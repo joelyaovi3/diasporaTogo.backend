@@ -271,5 +271,35 @@ userSchema.virtual('requiresPayment').get(function() {
   return this.userType !== 'Particulier'; // Paiement pour Company et Freelance
 });
 
+// AJOUTEZ CE MIDDLEWARE AVANT LE pre('save')
+userSchema.pre('validate', function(next) {
+  // Générer un username si vide ou null
+  if (!this.username || this.username.trim() === '') {
+    if (this.email) {
+      const baseUsername = this.email.split('@')[0]
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '') // Enlever caractères spéciaux
+        .substring(0, 20); // Limiter la longueur
+      
+      // S'assurer qu'on a au moins quelque chose
+      if (baseUsername && baseUsername.length > 0) {
+        this.username = `${baseUsername}${Math.floor(Math.random() * 1000)}`;
+      } else {
+        this.username = `user${Math.floor(Math.random() * 9000 + 1000)}`;
+      }
+    } else {
+      // Fallback si pas d'email (ne devrait pas arriver avec validation)
+      this.username = `user${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    }
+  }
+  
+  // Trim et lowercase
+  if (this.username) {
+    this.username = this.username.toLowerCase().trim();
+  }
+  
+  next();
+});
+
 const User = mongoose.model('User', userSchema);
 export default User;

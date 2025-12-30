@@ -2189,15 +2189,16 @@ export const register = async (req, res) => {
       marketingOptIn
     } = req.body;
 
-    // Valider que username n'est pas null
-    if (!username || username.trim() === '') {
-      // Générer un username basé sur l'email
-      const generatedUsername = email.split('@')[0] + Math.floor(Math.random() * 1000);
-      req.body.username = generatedUsername;
+    // Validation obligatoire
+    if (!acceptTerms) {
+      return res.status(400).json({
+        success: false,
+        message: 'Vous devez accepter les conditions d\'utilisation'
+      });
     }
 
     // 1. Vérifier si l'email existe déjà
-    const existingEmail = await User.findOne({ email });
+    const existingEmail = await User.findOne({ email: email.toLowerCase() });
     if (existingEmail) {
       return res.status(400).json({
         success: false,
@@ -2205,48 +2206,68 @@ export const register = async (req, res) => {
       });
     }
 
-    // 2. Vérifier si le userName existe déjà
-    const existingUserName = await User.findOne({ 
-      username: req.body.username 
-    });
-    if (existingUserName) {
-      return res.status(400).json({
-        success: false,
-        message: 'Ce nom d\'utilisateur est déjà pris'
-      });
-    }
-
-    // 2. Déterminer le statut selon le type d'utilisateur
-    const isParticulier = userType === 'Particulier';
-    
-    // 3. Créer l'utilisateur avec les bons paramètres initiaux
+    // 2. Préparer les données utilisateur
     const userData = {
       firstName,
       lastName,
-      username,
-      email,
+      email: email.toLowerCase(),
       password,
       phoneNumber,
       profession,
       country,
       city,
-      userType,
+      userType: userType || 'Particulier',
       acceptTerms,
-      marketingOptIn,
+      marketingOptIn
+    };
+
+    // 3. Gérer le username (optionnel - le middleware le générera si vide)
+    if (username && username.trim() !== '') {
+      // Vérifier l'unicité du username fourni
+      const existingUsername = await User.findOne({ 
+        username: username.toLowerCase().trim() 
+      });
+      if (existingUsername) {
+        return res.status(400).json({
+          success: false,
+          message: 'Ce nom d\'utilisateur est déjà pris'
+        });
+      }
+      userData.username = username.toLowerCase().trim();
+    }
+    // Si pas de username fourni, le middleware pre('validate') le générera automatiquement
+
+    // 4. Déterminer le statut selon le type d'utilisateur
+    const isParticulier = userData.userType === 'Particulier';
+    
+    // 5. Ajouter les champs de statut
+    Object.assign(userData, {
       isActive: isParticulier, // Actif immédiatement pour Particulier
       isVerified: isParticulier, // Vérifié immédiatement pour Particulier
       paymentStatus: isParticulier ? 'completed' : 'pending'
-    };
+    });
 
+    // 6. Créer l'utilisateur
     const user = await User.create(userData);
 
-    // 4. LOGIQUE PAR TYPE D'UTILISATEUR
+    // 7. LOGIQUE PAR TYPE D'UTILISATEUR
     if (isParticulier) {
       // 🔹 CAS PARTICULIER (GRATUIT)
       
       // Générer un token JWT
-      const token = user.generateAuthToken();
-      
+      const token = jwt.sign(
+        { 
+          userId: user._id,
+          email: user.email,
+          role: user.role,
+          userType: user.userType,
+          isVerified: user.isVerified,
+          isActive: user.isActive
+        }, 
+        process.env.JWT_SECRET || 'ASKDGJSLDJGSLA;KDJIUOEWUTPIOUASKLDGJ;SLDKAJG',
+        { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+      );
+
       // Envoyer email de bienvenue (à implémenter)
       // await sendWelcomeEmail(user.email, `${user.firstName} ${user.lastName}`);
 
@@ -2262,7 +2283,7 @@ export const register = async (req, res) => {
             id: user._id,
             firstName: user.firstName,
             lastName: user.lastName,
-            username: user.username,
+            username: user.username, // Maintenant garanti d'exister
             email: user.email,
             userType: user.userType,
             isVerified: user.isVerified,
@@ -2274,7 +2295,19 @@ export const register = async (req, res) => {
     } else {
       // 🔹 CAS ENTREPRISE (PAYANT)
       
-      // 4.1 Créer un customer Stripe
+      // Vérifier que Stripe est configuré
+      if (!process.env.STRIPE_SECRET_KEY) {
+        console.error('STRIPE_SECRET_KEY non configurée');
+        return res.status(500).json({
+          success: false,
+          message: 'Erreur de configuration du système de paiement'
+        });
+      }
+
+      // Initialiser Stripe
+      const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+      
+      // 7.1 Créer un customer Stripe
       const customer = await stripe.customers.create({
         email: user.email,
         name: `${user.firstName} ${user.lastName}`,
@@ -2286,7 +2319,7 @@ export const register = async (req, res) => {
         }
       });
 
-      // 4.2 Créer un Payment Intent
+      // 7.2 Créer un Payment Intent
       const paymentIntent = await stripe.paymentIntents.create({
         amount: 500, // 5€ en centimes
         currency: 'eur',
@@ -2297,24 +2330,25 @@ export const register = async (req, res) => {
           userType: user.userType,
           purpose: 'account_verification'
         },
-        description: `Vérification compte ${userType} - ${username}`,
+        description: `Vérification compte ${userType} - ${user.username}`,
         automatic_payment_methods: {
           enabled: true,
         },
       });
 
-      // 4.3 Mettre à jour l'utilisateur avec les infos Stripe
+      // 7.3 Mettre à jour l'utilisateur avec les infos Stripe
       user.stripeCustomerId = customer.id;
       user.paymentIntentId = paymentIntent.id;
       await user.save();
 
-      // 4.4 Réponse avec toutes les données nécessaires
+      // 7.4 Réponse avec toutes les données nécessaires
       return res.status(201).json({
         success: true,
         message: 'Inscription réussie. Procédez au paiement.',
         data: {
           userId: user._id.toString(),
           email: user.email,
+          username: user.username, // Maintenant garanti d'exister
           stripeCustomerId: customer.id,
           paymentIntentId: paymentIntent.id,
           clientSecret: paymentIntent.client_secret, // IMPORTANT !
@@ -2326,23 +2360,35 @@ export const register = async (req, res) => {
     }
 
   } catch (error) {
-    console.error('Erreur lors de l\'inscription:', error);
+    console.error('❌ Erreur lors de l\'inscription:', error);
     
-    // Gestion d'erreurs spécifiques Stripe
-    if (error.type === 'StripeInvalidRequestError') {
+    // Gestion d'erreurs spécifiques
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(val => val.message);
       return res.status(400).json({
         success: false,
-        message: 'Erreur de configuration du paiement',
-        code: 'STRIPE_ERROR',
-        detail: process.env.NODE_ENV === 'development' ? error.message : undefined
+        message: 'Erreur de validation',
+        errors: messages,
+        code: 'VALIDATION_ERROR'
+      });
+    }
+    
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern)[0];
+      return res.status(400).json({
+        success: false,
+        message: field === 'email' 
+          ? 'Un compte avec cet email existe déjà' 
+          : 'Ce nom d\'utilisateur est déjà pris',
+        code: 'DUPLICATE_KEY'
       });
     }
 
     res.status(500).json({
       success: false,
       message: 'Erreur lors de l\'inscription',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
-      code: 'SERVER_ERROR'
+      code: 'SERVER_ERROR',
+      detail: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };
