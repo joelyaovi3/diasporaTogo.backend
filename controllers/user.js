@@ -10,8 +10,8 @@ import jwt from "jsonwebtoken";
 //importation  du service de communication stripe
 import stripe from '../utils/stripe.js';
 import { sendVerificationEmail, sendWelcomeEmail } from '../utils/emailService.js';
-// import stripe from '../utils/stripe.js';
-import Stripe from 'stripe';
+import stripeService from '../utils/stripe.js';
+// import Stripe from 'stripe';
 
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com', 
@@ -2252,11 +2252,8 @@ export const register = async (req, res) => {
     // 6. Créer l'utilisateur
     const user = await User.create(userData);
 
-    // 7. LOGIQUE PAR TYPE D'UTILISATEUR
-    if (isParticulier) {
-      // 🔹 CAS PARTICULIER (GRATUIT)
-      
-      // Générer un token JWT
+   if (isParticulier) {
+      // 🔹 CAS PARTICULIER
       const token = jwt.sign(
         { 
           userId: user._id,
@@ -2266,12 +2263,9 @@ export const register = async (req, res) => {
           isVerified: user.isVerified,
           isActive: user.isActive
         }, 
-        process.env.JWT_SECRET || 'ASKDGJSLDJGSLA;KDJIUOEWUTPIOUASKLDGJ;SLDKAJG',
+        process.env.JWT_SECRET || 'your-secret-key',
         { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
       );
-
-      // Envoyer email de bienvenue (à implémenter)
-      // await sendWelcomeEmail(user.email, `${user.firstName} ${user.lastName}`);
 
       return res.status(201).json({
         success: true,
@@ -2285,7 +2279,7 @@ export const register = async (req, res) => {
             id: user._id,
             firstName: user.firstName,
             lastName: user.lastName,
-            username: user.username, // Maintenant garanti d'exister
+            username: user.username,
             email: user.email,
             userType: user.userType,
             isVerified: user.isVerified,
@@ -2293,69 +2287,37 @@ export const register = async (req, res) => {
           }
         }
       });
-
     } else {
-      // 🔹 CAS ENTREPRISE (PAYANT)
-      
+      // 🔹 CAS ENTREPRISE
       // Vérifier que Stripe est configuré
       if (!process.env.STRIPE_SECRET_KEY) {
-        console.error('STRIPE_SECRET_KEY non configurée');
         return res.status(500).json({
           success: false,
           message: 'Erreur de configuration du système de paiement'
         });
       }
 
-      // Initialiser Stripe - CORRECTION ICI
-      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-      
-      // 7.1 Créer un customer Stripe
-      const customer = await stripe.customers.create({
-        email: user.email,
-        name: `${user.firstName} ${user.lastName}`,
-        phone: user.phoneNumber,
-        metadata: {
-          userId: user._id.toString(),
-          userType: user.userType,
-          source: 'registration'
-        }
-      });
+      // Utiliser le service Stripe
+      const customer = await stripeService.createCustomer(user);
+      const paymentIntent = await stripeService.createPaymentIntent(customer.id, user);
 
-      // 7.2 Créer un Payment Intent
-      const paymentIntent = await stripe.paymentIntents.create({
-        amount: 500, // 5€ en centimes
-        currency: 'eur',
-        customer: customer.id,
-        metadata: {
-          userId: user._id.toString(),
-          email: user.email,
-          userType: user.userType,
-          purpose: 'account_verification'
-        },
-        description: `Vérification compte ${userType} - ${user.username}`,
-        automatic_payment_methods: {
-          enabled: true,
-        },
-      });
-
-      // 7.3 Mettre à jour l'utilisateur avec les infos Stripe
+      // Mettre à jour l'utilisateur
       user.stripeCustomerId = customer.id;
       user.paymentIntentId = paymentIntent.id;
       await user.save();
 
-      // 7.4 Réponse avec toutes les données nécessaires
       return res.status(201).json({
         success: true,
         message: 'Inscription réussie. Procédez au paiement.',
         data: {
           userId: user._id.toString(),
           email: user.email,
-          username: user.username, // Maintenant garanti d'exister
+          username: user.username,
           stripeCustomerId: customer.id,
           paymentIntentId: paymentIntent.id,
-          clientSecret: paymentIntent.client_secret, // IMPORTANT !
+          clientSecret: paymentIntent.client_secret,
           requiresPayment: true,
-          amount: 5, // €
+          amount: 5,
           currency: 'eur'
         }
       });
