@@ -10,6 +10,8 @@ import jwt from "jsonwebtoken";
 //importation  du service de communication stripe
 import stripe from '../utils/stripe.js';
 import { sendVerificationEmail, sendWelcomeEmail } from '../utils/emailService.js';
+// import stripe from '../utils/stripe.js';
+import Stripe from 'stripe';
 
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com', 
@@ -2304,8 +2306,8 @@ export const register = async (req, res) => {
         });
       }
 
-      // Initialiser Stripe
-      const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+      // Initialiser Stripe - CORRECTION ICI
+      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
       
       // 7.1 Créer un customer Stripe
       const customer = await stripe.customers.create({
@@ -2381,6 +2383,16 @@ export const register = async (req, res) => {
           ? 'Un compte avec cet email existe déjà' 
           : 'Ce nom d\'utilisateur est déjà pris',
         code: 'DUPLICATE_KEY'
+      });
+    }
+
+    // Gestion spécifique des erreurs Stripe
+    if (error.type && error.type.includes('Stripe')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Erreur lors de la configuration du paiement',
+        code: 'STRIPE_ERROR',
+        detail: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
 
