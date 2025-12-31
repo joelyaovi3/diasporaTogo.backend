@@ -2603,8 +2603,8 @@ export const verifyPayment = async (req, res) => {
         otpExpiresIn: '10 minutes',
         debugCode: process.env.NODE_ENV === 'development' ? verificationCode : undefined,
         redirectUrl: process.env.FRONTEND_URL ? 
-          `${process.env.FRONTEND_URL}/verify-otp` : 
-          'http://localhost:3000/verify-otp',
+          `${process.env.FRONTEND_URL}/verify` : 
+          'http://localhost:3000/verify',
         paymentDetails: {
           amount: user.amountPaid,
           date: user.paymentDate,
