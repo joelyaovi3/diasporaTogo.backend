@@ -2425,127 +2425,229 @@ export const register = async (req, res) => {
 
 // Étape 3: Vérifier le paiement et envoyer l'OTP
 export const verifyPayment = async (req, res) => {
+  console.log('🔍 Début vérification paiement:', {
+    paymentIntentId: req.body.paymentIntentId,
+    email: req.body.email,
+    timestamp: new Date().toISOString()
+  });
+
   try {
     const { paymentIntentId, email } = req.body;
 
     // Validation
     if (!paymentIntentId || !email) {
+      console.warn('⚠️ Données manquantes');
       return res.status(400).json({
         success: false,
         message: 'paymentIntentId et email sont requis'
       });
     }
 
-    // Vérifier le paiement avec le service Stripe
-    const paymentIntent = await stripeService.retrievePaymentIntent(paymentIntentId);
-    
-    if (paymentIntent.status !== 'succeeded') {
-      // Essayer de confirmer le paiement
-      const confirmedIntent = await stripeService.confirmPaymentIntent(paymentIntentId);
+    // Vérifier que Stripe est configuré
+    if (!process.env.STRIPE_SECRET_KEY) {
+      console.error('❌ STRIPE_SECRET_KEY non configurée');
+      return res.status(500).json({
+        success: false,
+        message: 'Service de paiement non configuré'
+      });
+    }
+
+    let paymentIntent;
+    try {
+      // 1. Récupérer le Payment Intent
+      console.log('🔍 Récupération PaymentIntent depuis Stripe...');
+      paymentIntent = await stripeService.retrievePaymentIntent(paymentIntentId);
+      console.log(`📊 Statut initial: ${paymentIntent.status}`);
+    } catch (stripeError) {
+      console.error('❌ Erreur Stripe API:', stripeError.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Impossible de récupérer les informations de paiement',
+        code: 'STRIPE_API_ERROR'
+      });
+    }
+
+    // 2. Vérifier si le paiement est déjà réussi
+    if (paymentIntent.status === 'succeeded') {
+      console.log('✅ Paiement déjà réussi');
+    } else {
+      console.log('🔄 Tentative de confirmation du paiement...');
       
-      if (confirmedIntent.status !== 'succeeded') {
+      try {
+        // Essayer de confirmer le paiement
+        const confirmedIntent = await stripeService.confirmPaymentIntent(paymentIntentId);
+        
+        if (confirmedIntent.status !== 'succeeded') {
+          console.log(`⚠️ Paiement non réussi, statut: ${confirmedIntent.status}`);
+          
+          // Gérer les différents états
+          if (confirmedIntent.status === 'requires_action') {
+            return res.status(200).json({
+              success: false,
+              message: 'Action supplémentaire requise',
+              requiresAction: true,
+              nextAction: confirmedIntent.next_action,
+              clientSecret: confirmedIntent.client_secret,
+              status: confirmedIntent.status
+            });
+          }
+          
+          return res.status(400).json({
+            success: false,
+            message: `Paiement en attente. Statut: ${confirmedIntent.status}`,
+            status: confirmedIntent.status,
+            paymentIntentId: paymentIntentId
+          });
+        }
+        
+        paymentIntent = confirmedIntent;
+        console.log('✅ Paiement confirmé avec succès');
+        
+      } catch (confirmError) {
+        console.error('❌ Erreur confirmation:', confirmError.message);
+        
+        // Si c'est un timeout, retourner une réponse spécifique
+        if (confirmError.message.includes('timeout') || confirmError.code === 'ETIMEDOUT') {
+          return res.status(408).json({
+            success: false,
+            message: 'Délai dépassé lors de la confirmation du paiement',
+            code: 'PAYMENT_TIMEOUT',
+            suggestion: 'Vérifiez votre connexion internet et réessayez'
+          });
+        }
+        
         return res.status(400).json({
           success: false,
-          message: `Paiement non réussi. Statut: ${confirmedIntent.status}`,
-          status: confirmedIntent.status
+          message: 'Erreur lors de la confirmation du paiement',
+          code: 'CONFIRMATION_ERROR',
+          detail: process.env.NODE_ENV === 'development' ? confirmError.message : undefined
         });
       }
     }
 
-    // 6. Trouver l'utilisateur
+    // 3. Trouver l'utilisateur
+    console.log(`🔍 Recherche utilisateur: ${email}`);
     const user = await User.findOne({ 
       email: email.toLowerCase().trim(),
       paymentIntentId 
     });
 
     if (!user) {
-      // Chercher par email seulement pour déboguer
+      console.log(`⚠️ Utilisateur non trouvé avec paymentIntentId`);
+      
+      // Chercher par email seulement
       const anyUser = await User.findOne({ email: email.toLowerCase().trim() });
       if (anyUser) {
-        console.log(`Utilisateur trouvé mais paymentIntentId différent. 
-          User: ${anyUser.paymentIntentId}, 
-          Request: ${paymentIntentId}`);
+        console.log(`ℹ️ Utilisateur trouvé mais paymentIntentId différent:
+          User paymentIntentId: ${anyUser.paymentIntentId}
+          Request paymentIntentId: ${paymentIntentId}`);
       }
       
       return res.status(404).json({
         success: false,
-        message: 'Utilisateur non trouvé avec ces identifiants'
+        message: 'Utilisateur non trouvé avec ces identifiants',
+        suggestion: 'Vérifiez que l\'email et l\'ID de paiement correspondent'
       });
     }
 
-    // 7. Vérifier si déjà vérifié
+    console.log(`✅ Utilisateur trouvé: ${user._id}`);
+
+    // 4. Vérifier si déjà vérifié
     if (user.isVerified) {
-      return res.status(400).json({
-        success: false,
+      console.log(`ℹ️ Compte déjà vérifié`);
+      return res.status(200).json({
+        success: true,
         message: 'Compte déjà vérifié',
-        userStatus: {
-          isVerified: user.isVerified,
-          paymentStatus: user.paymentStatus
+        data: {
+          isVerified: true,
+          requiresOTP: false,
+          userType: user.userType
         }
       });
     }
 
-    // 8. Mettre à jour et générer OTP
+    // 5. Mettre à jour l'utilisateur
     user.paymentStatus = 'completed';
     user.paymentDate = new Date();
     user.amountPaid = paymentIntent.amount / 100;
+    user.isActive = true;
 
     const verificationCode = user.generateVerificationCode();
     await user.save();
 
-    await sendVerificationEmail(
-      user.email, 
-      verificationCode, 
-      `${user.firstName} ${user.lastName}`
-    );
+    console.log(`✅ Compte mis à jour, OTP généré: ${verificationCode}`);
 
-    console.log(`✅ Paiement vérifié et OTP envoyé à: ${user.email}`);
+    // 6. Envoyer l'email (optionnel, peut être asynchrone)
+    try {
+      await sendVerificationEmail(
+        user.email, 
+        verificationCode, 
+        `${user.firstName} ${user.lastName}`
+      );
+      console.log(`📧 Email envoyé à: ${user.email}`);
+    } catch (emailError) {
+      console.error('❌ Erreur envoi email:', emailError.message);
+      // Ne pas bloquer le processus si l'email échoue
+    }
 
-    res.status(200).json({
+    // 7. Réponse succès avec redirection
+    console.log('✅ Vérification paiement terminée avec succès');
+    
+    return res.status(200).json({
       success: true,
-      message: 'Paiement vérifié. Code OTP envoyé par email.',
+      message: 'Paiement vérifié avec succès',
       data: {
         email: user.email,
         userType: user.userType,
-        codeExpiresIn: '10 minutes',
+        requiresOTP: true,
+        otpExpiresIn: '10 minutes',
         debugCode: process.env.NODE_ENV === 'development' ? verificationCode : undefined,
+        redirectUrl: process.env.FRONTEND_URL ? 
+          `${process.env.FRONTEND_URL}/verify-otp` : 
+          'http://localhost:3000/verify-otp',
         paymentDetails: {
           amount: user.amountPaid,
           date: user.paymentDate,
-          stripePaymentId: paymentIntentId
+          status: 'completed'
         }
       }
     });
 
   } catch (error) {
-    console.error('❌ Erreur vérification paiement:', error.message);
+    console.error('❌ Erreur vérification paiement:', {
+      message: error.message,
+      stack: error.stack,
+      code: error.code,
+      type: error.type
+    });
     
-    let message = 'Erreur lors de la vérification du paiement';
-    let statusCode = 500;
-    
-    if (error.type === 'StripeInvalidRequestError') {
-      statusCode = 400;
+    // Détecter spécifiquement les timeouts
+    if (error.message.includes('timeout') || 
+        error.code === 'ETIMEDOUT' || 
+        error.code === 'ECONNABORTED') {
       
-      if (error.message.includes('Invalid URL')) {
-        message = 'Configuration incorrecte: URL de retour invalide';
-        message += '\nVérifiez que FRONTEND_URL est défini dans .env (ex: http://localhost:3000)';
-      } else if (error.code === 'payment_intent_unexpected_state') {
-        message = `Le Payment Intent ne peut pas être confirmé dans cet état`;
-      }
+      return res.status(408).json({
+        success: false,
+        message: 'Délai de connexion dépassé avec le service de paiement',
+        code: 'CONNECTION_TIMEOUT',
+        suggestion: [
+          'Vérifiez votre connexion internet',
+          'Assurez-vous que Stripe est accessible depuis votre serveur',
+          'Réessayez dans quelques instants'
+        ]
+      });
     }
     
-    res.status(statusCode).json({
+    // Erreur générale
+    res.status(500).json({
       success: false,
-      message,
-      errorType: error.type,
-      errorCode: error.code,
-      ...(process.env.NODE_ENV === 'development' && { 
-        detail: error.message,
-        suggestion: 'Définissez FRONTEND_URL=http://localhost:3000 dans votre .env'
-      })
+      message: 'Erreur lors de la vérification du paiement',
+      code: 'SERVER_ERROR',
+      detail: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };
+
 
 
 // Renvoyer l'OTP
