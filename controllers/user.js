@@ -2428,67 +2428,28 @@ export const verifyPayment = async (req, res) => {
   try {
     const { paymentIntentId, email } = req.body;
 
-    // 1. D'abord, récupérer le Payment Intent
-    let paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
-    
-    console.log(`État initial: ${paymentIntent.status}`);
-    
-    // 2. Définir une URL de retour valide
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    const returnUrl = `${frontendUrl}/payment-complete`;
-    
-    // S'assurer que l'URL a un schéma valide
-    if (!returnUrl.startsWith('http://') && !returnUrl.startsWith('https://')) {
-      throw new Error(`URL de retour invalide: ${returnUrl}. Doit commencer par http:// ou https://`);
-    }
-
-    // 3. Si le Payment Intent nécessite une action
-    if (paymentIntent.status === 'requires_action' || 
-        paymentIntent.status === 'requires_confirmation') {
-      
-      // Pour les tests, utiliser une carte sans 3D Secure
-      paymentIntent = await stripe.paymentIntents.confirm(
-        paymentIntentId,
-        {
-          payment_method: 'pm_card_visa',
-          return_url: returnUrl
-        }
-      );
-      
-      console.log(`État après confirmation: ${paymentIntent.status}`);
-      
-      if (paymentIntent.status === 'requires_action') {
-        // Si c'est pour 3D Secure, retourner les infos pour redirection
-        return res.status(200).json({
-          success: false,
-          message: 'Authentification 3D Secure requise',
-          requires3DSecure: true,
-          redirectUrl: paymentIntent.next_action?.redirect_to_url?.url,
-          paymentIntentId: paymentIntent.id,
-          clientSecret: paymentIntent.client_secret
-        });
-      }
-    }
-    
-    // 4. Si le Payment Intent n'est pas encore confirmé
-    if (paymentIntent.status === 'requires_payment_method') {
-      paymentIntent = await stripe.paymentIntents.confirm(
-        paymentIntentId,
-        { 
-          payment_method: 'pm_card_visa',
-          return_url: returnUrl
-        }
-      );
-    }
-
-    // 5. Vérifier le statut final
-    if (paymentIntent.status !== 'succeeded') {
+    // Validation
+    if (!paymentIntentId || !email) {
       return res.status(400).json({
         success: false,
-        message: `Paiement en statut: ${paymentIntent.status}`,
-        status: paymentIntent.status,
-        paymentIntentId: paymentIntent.id
+        message: 'paymentIntentId et email sont requis'
       });
+    }
+
+    // Vérifier le paiement avec le service Stripe
+    const paymentIntent = await stripeService.retrievePaymentIntent(paymentIntentId);
+    
+    if (paymentIntent.status !== 'succeeded') {
+      // Essayer de confirmer le paiement
+      const confirmedIntent = await stripeService.confirmPaymentIntent(paymentIntentId);
+      
+      if (confirmedIntent.status !== 'succeeded') {
+        return res.status(400).json({
+          success: false,
+          message: `Paiement non réussi. Statut: ${confirmedIntent.status}`,
+          status: confirmedIntent.status
+        });
+      }
     }
 
     // 6. Trouver l'utilisateur

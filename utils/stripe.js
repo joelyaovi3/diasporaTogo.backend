@@ -37,6 +37,38 @@ class StripeService {
       },
     });
   }
+  async retrievePaymentIntent(paymentIntentId) {
+    try {
+      return await this.stripe.paymentIntents.retrieve(paymentIntentId);
+    } catch (error) {
+      console.error('❌ Erreur retrievePaymentIntent:', error.message);
+      throw error;
+    }
+  }
+
+  async confirmPaymentIntent(paymentIntentId, options = {}) {
+    try {
+      const defaultOptions = {
+        payment_method: 'pm_card_visa', // Pour les tests
+        return_url: process.env.FRONTEND_URL ? `${process.env.FRONTEND_URL}/payment-complete` : 'http://localhost:3000/payment-complete'
+      };
+      
+      const finalOptions = { ...defaultOptions, ...options };
+      return await this.stripe.paymentIntents.confirm(paymentIntentId, finalOptions);
+    } catch (error) {
+      console.error('❌ Erreur confirmPaymentIntent:', error.message);
+      throw error;
+    }
+  }
+
+  async isPaymentSucceeded(paymentIntentId) {
+    try {
+      const paymentIntent = await this.retrievePaymentIntent(paymentIntentId);
+      return paymentIntent.status === 'succeeded';
+    } catch (error) {
+      return false;
+    }
+  }
 }
 
 export default new StripeService();
