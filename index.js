@@ -82,4 +82,5 @@ server.listen(PORT, () => {
 
 // Exporter pour les tests
 // export {app, io}
-export { app };
+// export { app };
+export default app;
