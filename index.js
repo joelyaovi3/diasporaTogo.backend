@@ -77,7 +77,7 @@ const server = http.createServer(app);
 
 server.listen(PORT, () => {
   console.log(`🚀 Serveur démarré sur le port ${PORT}`);
-  // console.log(`🔌 Socket.IO actif`);
+  // console.log(`🔌 Socket.IO actif`)
 });
 
 // Exporter pour les tests
