@@ -11,7 +11,7 @@ import cookieParser from 'cookie-parser';
 import newsRoutes from './routes/newsRoutes.js';
 import newsValidation from './routes/moderationRoutes.js';
 import chatRoutes from './routes/chat.js';
-import { configureSocket } from './config/socketConfig.js';
+// import { configureSocket } from './config/socketConfig.js';
 import http from 'http';
 
 const app = express();
