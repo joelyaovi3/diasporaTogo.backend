@@ -14,10 +14,12 @@ const userSchema = new mongoose.Schema({
   username: {
     type: String,
     required: [true, 'Le nom d\'utilisateur est requis'],
-    unique: true,
+    // unique: true,
     trim: true,
     lowercase: true, // Optionnel: uniformiser la casse
-    index: true // Ajouter explicitement
+    index: true, // Ajouter explicitement
+    sparse: true, // 
+    default: null // 
   },
   email: {
     type: String,
@@ -118,59 +120,57 @@ const userSchema = new mongoose.Schema({
 
 // Remplacer les deux middleware pre('save') par un seul
 userSchema.pre('save', async function(next) {
-  // Étape 1: Gérer le username - plus robuste
-  if (!this.username || this.username.trim() === '') {
-    // Extraire la partie avant @ de l'email
-    const baseUsername = this.email ? this.email.split('@')[0] : 'user';
-    // Nettoyer le username (enlever caractères spéciaux)
+  const user = this;
+  
+  // Étape 1: S'assurer qu'il y a toujours un username
+  if (!user.username || user.username.trim() === '') {
+    // Générer un username basé sur l'email
+    const baseUsername = user.email ? user.email.split('@')[0] : 'user';
     const cleanUsername = baseUsername.replace(/[^a-z0-9]/g, '');
-    // S'assurer qu'il n'est pas vide
     const finalUsername = cleanUsername || 'user';
-    // Ajouter un suffixe aléatoire
-    this.username = `${finalUsername}${Math.floor(Math.random() * 1000)}`;
+    user.username = `${finalUsername}${Math.floor(Math.random() * 1000)}`;
   }
   
-  // S'assurer que le username est en lowercase et trimmed
-  if (this.username) {
-    this.username = this.username.toLowerCase().trim();
-  }
+  // Nettoyer et formater le username
+  user.username = user.username.toLowerCase().trim();
   
-  // Étape 2: Vérifier l'unicité du username
-  if (this.isModified('username')) {
+  // Étape 2: Vérifier l'unicité
+  if (user.isModified('username')) {
     try {
-      const existingUser = await this.constructor.findOne({
-        username: this.username,
-        _id: { $ne: this._id }
-      });
+      let attempts = 0;
+      let isUnique = false;
       
-      if (existingUser) {
-        // Si le username existe déjà, en générer un nouveau
-        const baseUsername = this.email ? this.email.split('@')[0] : 'user';
-        const cleanUsername = baseUsername.replace(/[^a-z0-9]/g, '');
-        const finalUsername = cleanUsername || 'user';
-        this.username = `${finalUsername}${Math.floor(Math.random() * 9000 + 1000)}`;
-        
-        // Vérifier à nouveau l'unicité (récursif mais limité)
-        const checkAgain = await this.constructor.findOne({
-          username: this.username,
-          _id: { $ne: this._id }
+      while (!isUnique && attempts < 5) {
+        const existingUser = await mongoose.model('User').findOne({
+          username: user.username,
+          _id: { $ne: user._id }
         });
         
-        if (checkAgain) {
-          this.username = `${finalUsername}${Math.floor(Math.random() * 90000 + 10000)}`;
+        if (!existingUser) {
+          isUnique = true;
+        } else {
+          // Générer un nouveau username
+          const randomSuffix = Math.floor(Math.random() * 90000) + 10000;
+          user.username = user.username.replace(/\d+$/, '') + randomSuffix;
+          attempts++;
         }
+      }
+      
+      if (!isUnique) {
+        // En dernier recours, utiliser un timestamp
+        user.username = `${user.username}_${Date.now()}`;
       }
     } catch (err) {
       return next(err);
     }
   }
   
-  // Étape 3: Hasher le mot de passe si modifié
-  if (!this.isModified('password')) return next();
+  // Étape 3: Hasher le mot de passe
+  if (!user.isModified('password')) return next();
   
   try {
     const salt = await bcrypt.genSalt(12);
-    this.password = await bcrypt.hash(this.password, salt);
+    user.password = await bcrypt.hash(user.password, salt);
     next();
   } catch (error) {
     next(error);
