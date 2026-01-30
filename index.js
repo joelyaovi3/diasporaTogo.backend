@@ -64,21 +64,22 @@ const PORT = process.env.PORT || 8003;
 const server = http.createServer(app);
 
 // Configurer Socket.IO
-const io = configureSocket(server);
+// const io = configureSocket(server);
 
 // Ajouter io à l'objet app pour l'utiliser dans les routes
-app.set('io', io);
+// app.set('io', io);
 
 // Middleware pour injecter io dans les requêtes
-app.use((req, res, next) => {
-  req.io = io;
-  next();
-});
+// app.use((req, res, next) => {
+//   req.io = io;
+//   next();
+// });
 
 server.listen(PORT, () => {
   console.log(`🚀 Serveur démarré sur le port ${PORT}`);
-  console.log(`🔌 Socket.IO actif`);
+  // console.log(`🔌 Socket.IO actif`);
 });
 
 // Exporter pour les tests
-export { app, io };
+// export {app, io}
+export { app };
