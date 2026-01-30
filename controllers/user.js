@@ -1390,19 +1390,71 @@ export const getCurrentSession = async (req, res) => {
 };
 
 export const searchUsers = async (req, res) => {
-  // const { search } = req.query;
-  const search = req.query.search
-    ? {
-      $or: [
-        { name: { $regex: req.query.search, $options: 'i' } },
-        { email: { $regex: req.query.search, $options: 'i' } },
-      ],
+  try {
+    const { q, search } = req.query;
+    const searchTerm = q || search;
+    
+    if (!searchTerm || searchTerm.trim() === '') {
+      return res.status(200).json({
+        success: true,
+        users: [],
+        message: 'Veuillez entrer un terme de recherche'
+      });
     }
-    : {};
 
-  const users = await User.find(search).find({ _id: { $ne: req.rootUserId } });
-  res.status(200).send(users);
+    const searchQuery = {
+      $or: [
+        { firstName: { $regex: searchTerm, $options: 'i' } },
+        { lastName: { $regex: searchTerm, $options: 'i' } },
+        { email: { $regex: searchTerm, $options: 'i' } },
+        { username: { $regex: searchTerm, $options: 'i' } }
+      ]
+    };
+
+    const users = await User.find(searchQuery)
+      .find({ _id: { $ne: req.user._id } }) // Exclure l'utilisateur courant
+      .select('firstName lastName username email avatar isOnline lastSeen')
+      .limit(10);
+
+    res.status(200).json({
+      success: true,
+      users,
+      count: users.length
+    });
+  } catch (error) {
+    console.error('Erreur recherche utilisateurs:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erreur lors de la recherche'
+    });
+  }
 };
+
+export const getRecentUsers = async (req, res) => {
+  try {
+    // Récupérer les derniers utilisateurs actifs
+    const recentUsers = await User.find({
+      _id: { $ne: req.user._id },
+      isActive: true,
+      lastLogin: { $exists: true }
+    })
+      .sort({ lastLogin: -1 })
+      .select('firstName lastName username email avatar isOnline lastSeen')
+      .limit(6);
+
+    res.status(200).json({
+      success: true,
+      users: recentUsers
+    });
+  } catch (error) {
+    console.error('Erreur récupération utilisateurs récents:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erreur lors de la récupération'
+    });
+  }
+};
+
 export const getUserById = async (req, res) => {
   const { id } = req.params;
   try {
@@ -2263,7 +2315,7 @@ export const register = async (req, res) => {
           isVerified: user.isVerified,
           isActive: user.isActive
         }, 
-        process.env.JWT_SECRET || 'your-secret-key',
+        process.env.SECRET,
         { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
       );
 
@@ -2602,9 +2654,9 @@ export const verifyPayment = async (req, res) => {
         requiresOTP: true,
         otpExpiresIn: '10 minutes',
         debugCode: process.env.NODE_ENV === 'development' ? verificationCode : undefined,
-        redirectUrl: process.env.FRONTEND_URL ? 
-          `${process.env.FRONTEND_URL}/verify` : 
-          'http://localhost:3000/verify',
+        redirectUrl: process.env.FRONTEND_URL,
+          // `${process.env.FRONTEND_URL}/verify` : 
+          // 'http://localhost:3000/verify',
         paymentDetails: {
           amount: user.amountPaid,
           date: user.paymentDate,

@@ -1,18 +1,3 @@
-// import multer from 'multer';
-
-// const storage = multer.diskStorage({
-//   destination: function (req, file, cb) {
-//     cb(null, 'uploads/'); // Dossier temporaire pour stocker les fichiers avant téléversement sur Cloudinary
-//   },
-//   filename: function (req, file, cb) {
-//     cb(null, Date.now() + '-' + file.originalname); // Nom de fichier unique
-//   },
-// });
-
-// const upload = multer({ storage: storage });
-
-// export const uploadMiddleware = upload.single('file');
-
 import multer from 'multer';
 import path from 'path';
 

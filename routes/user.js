@@ -27,6 +27,7 @@ import {
   getActiveSessions,
   revokeSession,
   revokeAllOtherSessions,
+  getRecentUsers,
 } from '../controllers/user.js'; 
 import { Auth } from '../middleware/user.js';
 
@@ -68,6 +69,7 @@ router.delete('/auth/sessions', Auth, revokeAllOtherSessions);
 
 router.post('/auth/google', googleAuth);
 router.get('/user?', Auth, searchUsers);
+router.get('/recent', Auth, getRecentUsers);
 router.get('/users/:id', getUserById);
 router.patch('/users/update/:id', Auth, updateInfo);
 router.get("/getAllUser", Auth ,getUser);

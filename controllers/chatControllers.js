@@ -1,881 +1,957 @@
-import Chat from '../models/chatModel.js';
-import user from '../models/userModel.js';
-import mongoose from 'mongoose';
+// controllers/chatController.js
+import Invitation from '../models/invitationModel.js';
+import Conversation from '../models/conversationModel.js';
+import Message from '../models/messageModel.js';
+import User from '../models/userModel.js';
+import { deleteCloudinaryFile } from '../middleware/cloudinaryChat.js';
 
-export const accessChats = async (req, res) => {
-  const { userId } = req.body;
-
-  if (!userId) res.send({ message: "Provide User's Id" });
-
-  let chatExists = await Chat.find({
-    isGroup: false,
-    $and: [
-      { users: { $elemMatch: { $eq: userId } } },
-      { users: { $elemMatch: { $eq: req.rootUserId } } },
-    ],
-  })
-    .populate('users', '-password')
-    .populate('latestMessage');
-  chatExists = await user.populate(chatExists, {
-    path: 'latestMessage.sender',
-    select: 'name email avatar',
-  });
-  if (chatExists.length > 0) {
-    const chat = chatExists[0];
-    // Réinitialiser les messages non lus pour cet utilisateur
-    chat.unreadMessages.set(req.rootUserId.toString(), 0);
-    await chat.save();
-    res.status(200).send(chat);
-  } else {
-    let data = {
-      chatName: 'sender',
-      users: [userId, req.rootUserId],
-      isGroup: false,
-    };
-    data.unreadMessages = {
-      [userId]: 0,
-      [req.rootUserId]: 0
-    };
-    try {
-      const newChat = await Chat.create(data);
-      const chat = await Chat.find({ _id: newChat._id }).populate(
-        'users',
-        '-password'
-      );
-      res.status(200).json(chat);
-    } catch (error) {
-      res.status(500).send(error);
-    }
-  }
-};
-
-export const fetchAllChats = async (req, res) => {
+// Contrôleur pour les invitations
+export const invitationController = {
+  // Envoyer une invitation
+ // controllers/chatController.js - fonction sendInvitation
+sendInvitation: async (req, res) => {
   try {
-    const chats = await Chat.find({
-      users: { $elemMatch: { $eq: req.rootUserId } },
-    })
-      .populate('users')
-      .populate('latestMessage')
-      .populate('groupAdmin')
-      .sort({ updatedAt: -1 });
+    const { receiverId, message } = req.body;
+    
+    // Vérifier que req.user existe
+    if (!req.user || !req.user._id) {
+      console.error('❌ User not found in request:', req.user);
+      return res.status(401).json({
+        success: false,
+        error: 'Utilisateur non authentifié'
+      });
+    }
+    
+    const senderId = req.user._id;
+
+    console.log('=== DEBUG sendInvitation ===');
+    console.log('Sender ID:', senderId);
+    console.log('Receiver ID:', receiverId);
+    console.log('Request user:', req.user);
+    console.log('Request body:', req.body);
+    console.log('===========================');
+
+    // Vérifier que receiverId est fourni
+    if (!receiverId) {
+      return res.status(400).json({
+        success: false,
+        error: 'ID du destinataire requis'
+      });
+    }
+
+    // Vérifier que l'utilisateur ne s'envoie pas d'invitation à lui-même
+    if (senderId.toString() === receiverId.toString()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Vous ne pouvez pas vous envoyer une invitation à vous-même'
+      });
+    }
+
+    // Vérifier que le destinataire existe
+    const receiver = await User.findById(receiverId)
+      .select('firstName lastName username email avatar isActive isVerified');
+    
+    if (!receiver) {
+      return res.status(404).json({
+        success: false,
+        error: 'Destinataire introuvable'
+      });
+    }
+
+    // Vérifier que le destinataire est actif
+    if (!receiver.isActive || !receiver.isVerified) {
+      return res.status(400).json({
+        success: false,
+        error: 'Le destinataire n\'a pas activé son compte'
+      });
+    }
+
+    // Vérifier si une invitation existe déjà
+    const existingInvitation = await Invitation.findOne({
+      $or: [
+        { sender: senderId, receiver: receiverId, status: { $in: ['pending', 'accepted'] } },
+        { sender: receiverId, receiver: senderId, status: { $in: ['pending', 'accepted'] } }
+      ]
+    });
+
+    if (existingInvitation) {
+      const errorMessage = existingInvitation.status === 'pending' 
+        ? 'Une invitation est déjà en attente' 
+        : 'Vous avez déjà une conversation active avec cet utilisateur';
       
-    const finalChats = await user.populate(chats, {
-      path: 'latestMessage.sender',
-      select: 'name email avatar',
-    });
-    
-    res.status(200).json(finalChats);
-  } catch (error) {
-    res.status(500).send(error);
-  }
-};
+      return res.status(400).json({
+        success: false,
+        error: errorMessage,
+        existingInvitation: {
+          id: existingInvitation._id,
+          status: existingInvitation.status
+        }
+      });
+    }
 
-// unreadMessagesController.js
-export const updateUnreadCount = async (req, res) => {
-  const { chatId, userId } = req.body;
-  
-  try {
-    const chat = await Chat.findById(chatId);
-    if (!chat) return res.status(404).send("Chat not found");
-    
-    // Incrémenter le compteur de messages non lus
-    const currentCount = chat.unreadMessages.get(userId) || 0;
-    chat.unreadMessages.set(userId, currentCount + 1);
-    await chat.save();
-    
-    res.status(200).json({ success: true });
-  } catch (error) {
-    res.status(500).send(error);
-  }
-};
-
-export const resetUnreadCount = async (req, res) => {
-  const { chatId, userId } = req.body;
-  
-  try {
-    const chat = await Chat.findById(chatId);
-    if (!chat) return res.status(404).send("Chat not found");
-    
-    // Réinitialiser le compteur
-    chat.unreadMessages.set(userId, 0);
-    await chat.save();
-    
-    res.status(200).json({ success: true });
-  } catch (error) {
-    res.status(500).send(error);
-  }
-};
-
-// Dans votre contrôleur backend
-export const getAllNews = async (req, res) => {
-  try {
-    const news = await Chat.find({ isNews: true })
-      .populate('newsAuth', 'username name email') // Peuplez les données utilisateur
-      .exec();
-    res.json(news);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-export const getNewsById = async(req, res) =>{
-  const {id} = req.params
-  try {
-    const chat = await Chat.findOne({_id: id, isNews: true})
-    res.status(200).send(chat)
-  } catch (error) {
-    res.status(500).send(error);
-  }
-}
-
-export const getGrpList = async(req, res) =>{
-  try {
-    const chat = await Chat.find({isGroup: true})
-    res.status(200).send(chat);
-  } catch (error) {
-    res.status(500).send(error);
-  }
-}
-
-
-export const createNews = async (req, res) => {
-  const { chatName, description, image } = req.body;
-
-  // Vérification que l'utilisateur est authentifié
-  if (!req.rootUserId) {  // Changez req.userId en req.user._id
-    return res.status(401).json({
-      success: false,
-      message: "Non autorisé - Utilisateur non connecté",
-    });
-  }
-
-  try {
-    const chat = await Chat.create({
-      chatName,
-      description,
-      image,
-      isNews: true,
-      status: "pending",
-      groupAdmin: req.rootUserId,  // Utilisez req.user._id partout
-      newsAuth: req.rootUserId,
+    // Créer l'invitation
+    const invitation = await Invitation.create({
+      sender: senderId,
+      receiver: receiverId,
+      message: message || `Bonjour, je souhaite discuter avec vous`
     });
 
-    return res.status(201).json({
+    console.log('Invitation créée (raw):', invitation);
+
+    // Population avec approche différente pour éviter les erreurs
+    let populatedSender = req.user; // Utiliser l'utilisateur déjà authentifié
+    let populatedReceiver = receiver;
+
+    // Si on veut les données complètes, on peut les récupérer
+    if (!populatedSender.avatar || !populatedSender.firstName) {
+      populatedSender = await User.findById(senderId)
+        .select('firstName lastName username email avatar')
+        .lean();
+    }
+
+    if (!populatedReceiver.avatar || !populatedReceiver.firstName) {
+      populatedReceiver = await User.findById(receiverId)
+        .select('firstName lastName username email avatar')
+        .lean();
+    }
+
+    console.log('Sender populated:', populatedSender);
+    console.log('Receiver populated:', populatedReceiver);
+
+    // Préparer la réponse
+    const responseInvitation = {
+      _id: invitation._id,
+      sender: {
+        _id: populatedSender._id,
+        firstName: populatedSender.firstName,
+        lastName: populatedSender.lastName,
+        username: populatedSender.username,
+        email: populatedSender.email,
+        avatar: populatedSender.avatar
+      },
+      receiver: {
+        _id: populatedReceiver._id,
+        firstName: populatedReceiver.firstName,
+        lastName: populatedReceiver.lastName,
+        username: populatedReceiver.username,
+        email: populatedReceiver.email,
+        avatar: populatedReceiver.avatar
+      },
+      status: invitation.status,
+      message: invitation.message,
+      expiresAt: invitation.expiresAt,
+      createdAt: invitation.createdAt,
+      updatedAt: invitation.updatedAt
+    };
+
+    console.log('DEBUG invitation final:', responseInvitation);
+
+    res.status(201).json({
       success: true,
-      message: "News créée avec succès",
-      data: chat,
+      message: 'Invitation envoyée avec succès',
+      invitation: responseInvitation
     });
-  } catch (error) {
-    console.error("Erreur:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Erreur serveur",
-    });
-  }
-};
 
+    // Émettre un événement Socket.IO au destinataire
+    if (req.io) {
+      const socketData = {
+        _id: invitation._id,
+        sender: responseInvitation.sender,
+        receiver: responseInvitation.receiver,
+        status: invitation.status,
+        message: invitation.message,
+        createdAt: invitation.createdAt
+      };
 
-
-
-
-
-
-
-
-
-export const getUserNews = async (req, res) => {
-  try {
-    const userId = req.rootUserId;
-    
-    // Add validation for userId
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({ message: 'Invalid user ID' });
-    }
-
-    const userNews = await Chat.find({
-      isNews: true,
-      newsAuth: userId
-    }).populate('newsAuth', 'username');
-    
-    res.status(200).json(userNews);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-export const getNewsByUserConnected = async (req, res) => {
-  try {
-    const userId = req.rootUserId;
-
-    // Validation renforcée
-    if (!userId || !mongoose.isValidObjectId(userId)) {
-      return res.status(400).json({ 
-        message: 'ID utilisateur invalide ou manquant',
-        receivedId: userId
+      console.log('DEBUG emit socket:', {
+        to: receiverId.toString(),
+        event: 'new-invitation',
+        data: socketData
       });
+
+      req.io.to(receiverId.toString()).emit('new-invitation', socketData);
     }
 
-    // console.log('userId:', userId, 'type:', typeof userId);
-
-    // No need to explicitly convert to ObjectId - Mongoose will handle it
-    const userNews = await Chat.find({
-      isNews: true,
-      isBlocked: false,
-      users: userId,
-      newsAuth: userId
-      // $or: [
-      //   { users: userId },  // Mongoose will cast string to ObjectId
-      //   { newsAuth: userId }
-      // ]
-    })
-    .populate('users', '-password')
-    .populate('newsAuth', '-password')
-    .populate('latestMessage')
-    .sort({ updatedAt: -1 });
-
-    res.status(200).json(userNews);
   } catch (error) {
-    console.error('Error fetching news:', error);
+    console.error('❌ Erreur détaillée envoi invitation:', {
+      message: error.message,
+      stack: error.stack,
+      body: req.body,
+      user: req.user,
+      errorName: error.name,
+      errorCode: error.code
+    });
     
+    // Gérer les erreurs spécifiques
     if (error.name === 'CastError') {
-      return res.status(400).json({ 
-        message: 'Format de données invalide',
-        details: error.message
+      return res.status(400).json({
+        success: false,
+        error: 'ID invalide'
       });
     }
     
-    res.status(500).json({ 
-      message: 'Erreur lors de la récupération des news',
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      error: 'Erreur lors de l\'envoi de l\'invitation',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
+  }
+},
+
+  // Accepter une invitation
+  acceptInvitation: async (req, res) => {
+    try {
+      const { invitationId } = req.params;
+      const userId = req.user._id;
+
+      const invitation = await Invitation.findById(invitationId)
+        .populate('sender', 'firstName lastName username email avatar')
+        .populate('receiver', 'firstName lastName username email avatar');
+
+      if (!invitation) {
+        return res.status(404).json({
+          success: false,
+          error: 'Invitation introuvable'
+        });
+      }
+
+      // Vérifier que l'utilisateur est bien le destinataire
+      if (invitation.receiver._id.toString() !== userId.toString()) {
+        return res.status(403).json({
+          success: false,
+          error: 'Vous n\'êtes pas autorisé à accepter cette invitation'
+        });
+      }
+
+      // Vérifier le statut
+      if (invitation.status !== 'pending') {
+        return res.status(400).json({
+          success: false,
+          error: `Cette invitation a déjà été ${invitation.status === 'accepted' ? 'acceptée' : 'refusée'}`
+        });
+      }
+
+      // Vérifier l'expiration
+      if (invitation.expiresAt < new Date()) {
+        invitation.status = 'expired';
+        await invitation.save();
+        return res.status(400).json({
+          success: false,
+          error: 'Cette invitation a expiré'
+        });
+      }
+
+      // Accepter l'invitation
+      invitation.status = 'accepted';
+      await invitation.save();
+
+      // Créer la conversation
+      const conversation = await Conversation.create({
+        participants: [invitation.sender._id, invitation.receiver._id],
+        invitation: invitation._id
+      });
+
+      // Populer les informations
+      await conversation.populate('participants', 'firstName lastName username email avatar');
+
+      res.status(200).json({
+        success: true,
+        message: 'Invitation acceptée avec succès',
+        conversation
+      });
+
+      // Émettre des événements Socket.IO
+      if (req.io) {
+        // Au destinataire (celui qui a accepté)
+        req.io.to(userId.toString()).emit('invitation-accepted', {
+          invitationId: invitation._id,
+          conversation
+        });
+
+        // À l'expéditeur
+        req.io.to(invitation.sender._id.toString()).emit('invitation-accepted', {
+          invitationId: invitation._id,
+          conversation,
+          acceptedBy: invitation.receiver
+        });
+
+        // Notifier les deux parties de la nouvelle conversation
+        const participants = [invitation.sender._id.toString(), invitation.receiver._id.toString()];
+        participants.forEach(participantId => {
+          req.io.to(participantId).emit('new-conversation', conversation);
+        });
+      }
+
+    } catch (error) {
+      console.error('Erreur acceptation invitation:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Erreur lors de l\'acceptation de l\'invitation'
+      });
+    }
+  },
+
+  // Refuser une invitation
+  rejectInvitation: async (req, res) => {
+    try {
+      const { invitationId } = req.params;
+      const userId = req.user._id;
+
+      const invitation = await Invitation.findById(invitationId);
+
+      if (!invitation) {
+        return res.status(404).json({
+          success: false,
+          error: 'Invitation introuvable'
+        });
+      }
+
+      // Vérifier que l'utilisateur est bien le destinataire
+      if (invitation.receiver.toString() !== userId.toString()) {
+        return res.status(403).json({
+          success: false,
+          error: 'Vous n\'êtes pas autorisé à refuser cette invitation'
+        });
+      }
+
+      // Refuser l'invitation
+      invitation.status = 'rejected';
+      await invitation.save();
+
+      res.status(200).json({
+        success: true,
+        message: 'Invitation refusée avec succès'
+      });
+
+      // Notifier l'expéditeur via Socket.IO
+      if (req.io) {
+        req.io.to(invitation.sender.toString()).emit('invitation-rejected', {
+          invitationId: invitation._id,
+          rejectedBy: userId
+        });
+      }
+
+    } catch (error) {
+      console.error('Erreur refus invitation:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Erreur lors du refus de l\'invitation'
+      });
+    }
+  },
+
+  // Annuler une invitation
+  cancelInvitation: async (req, res) => {
+    try {
+      const { invitationId } = req.params;
+      const userId = req.user._id;
+
+      const invitation = await Invitation.findById(invitationId);
+
+      if (!invitation) {
+        return res.status(404).json({
+          success: false,
+          error: 'Invitation introuvable'
+        });
+      }
+
+      // Vérifier que l'utilisateur est bien l'expéditeur
+      if (invitation.sender.toString() !== userId.toString()) {
+        return res.status(403).json({
+          success: false,
+          error: 'Vous n\'êtes pas autorisé à annuler cette invitation'
+        });
+      }
+
+      // Annuler l'invitation
+      invitation.status = 'cancelled';
+      await invitation.save();
+
+      res.status(200).json({
+        success: true,
+        message: 'Invitation annulée avec succès'
+      });
+
+      // Notifier le destinataire via Socket.IO
+      if (req.io) {
+        req.io.to(invitation.receiver.toString()).emit('invitation-cancelled', {
+          invitationId: invitation._id,
+          cancelledBy: userId
+        });
+      }
+
+    } catch (error) {
+      console.error('Erreur annulation invitation:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Erreur lors de l\'annulation de l\'invitation'
+      });
+    }
+  },
+
+  // Obtenir les invitations reçues
+  getReceivedInvitations: async (req, res) => {
+    try {
+      const userId = req.user._id;
+      const { status = 'pending' } = req.query;
+
+      const invitations = await Invitation.find({
+        receiver: userId,
+        status: status
+      })
+        .populate('sender', 'firstName lastName username email avatar')
+        .sort({ createdAt: -1 });
+
+      res.status(200).json({
+        success: true,
+        invitations,
+        count: invitations.length
+      });
+
+    } catch (error) {
+      console.error('Erreur récupération invitations:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Erreur lors de la récupération des invitations'
+      });
+    }
+  },
+
+  // Obtenir les invitations envoyées
+  getSentInvitations: async (req, res) => {
+    try {
+      const userId = req.user._id;
+      const { status = 'pending' } = req.query;
+
+      const invitations = await Invitation.find({
+        sender: userId,
+        status: status
+      })
+        .populate('receiver', 'firstName lastName username email avatar')
+        .sort({ createdAt: -1 });
+
+      res.status(200).json({
+        success: true,
+        invitations,
+        count: invitations.length
+      });
+
+    } catch (error) {
+      console.error('Erreur récupération invitations envoyées:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Erreur lors de la récupération des invitations envoyées'
+      });
+    }
   }
 };
 
-export const updateNews = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const userId = req.rootUserId;
-    const updates = req.body;
+// Contrôleur pour les conversations
+export const conversationController = {
+  // Obtenir les conversations de l'utilisateur
+  getConversations: async (req, res) => {
+    try {
+      const userId = req.user._id;
 
-    const news = await Chat.findOne({
-      _id: id,
-      isNews: true,
-      newsAuthor: userId
-    });
+      const conversations = await Conversation.find({
+        participants: userId,
+        isActive: true
+      })
+        .populate('participants', 'firstName lastName username email avatar')
+        .populate('lastMessage')
+        .sort({ updatedAt: -1 });
 
-    if (!news) {
-      return res.status(404).json({ message: 'News not found or unauthorized' });
+      // Calculer les messages non lus pour chaque conversation
+      const conversationsWithUnread = await Promise.all(
+        conversations.map(async (conversation) => {
+          const unreadCount = await Message.countDocuments({
+            conversation: conversation._id,
+            receiver: userId,
+            isRead: false
+          });
+
+          return {
+            ...conversation.toObject(),
+            unreadCount
+          };
+        })
+      );
+
+      res.status(200).json({
+        success: true,
+        conversations: conversationsWithUnread,
+        count: conversationsWithUnread.length
+      });
+
+    } catch (error) {
+      console.error('Erreur récupération conversations:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Erreur lors de la récupération des conversations'
+      });
     }
+  },
 
-    console.log('up',updates)
-    console.log('news', news)
+  // Obtenir une conversation spécifique
+  getConversation: async (req, res) => {
+    try {
+      const { conversationId } = req.params;
+      const userId = req.user._id;
 
-    Object.assign(news, updates);
-    await news.save();
-    
-    res.status(200).json(news);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+      const conversation = await Conversation.findOne({
+        _id: conversationId,
+        participants: userId,
+        isActive: true
+      })
+        .populate('participants', 'firstName lastName username email avatar')
+        .populate('invitation');
+
+      if (!conversation) {
+        return res.status(404).json({
+          success: false,
+          error: 'Conversation introuvable ou inaccessible'
+        });
+      }
+
+      // Trouver l'autre participant
+      const otherParticipant = conversation.participants.find(
+        participant => participant._id.toString() !== userId.toString()
+      );
+
+      res.status(200).json({
+        success: true,
+        conversation: {
+          ...conversation.toObject(),
+          otherParticipant
+        }
+      });
+
+    } catch (error) {
+      console.error('Erreur récupération conversation:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Erreur lors de la récupération de la conversation'
+      });
+    }
+  },
+
+  // Archiver une conversation
+  archiveConversation: async (req, res) => {
+    try {
+      const { conversationId } = req.params;
+      const userId = req.user._id;
+
+      const conversation = await Conversation.findOne({
+        _id: conversationId,
+        participants: userId
+      });
+
+      if (!conversation) {
+        return res.status(404).json({
+          success: false,
+          error: 'Conversation introuvable'
+        });
+      }
+
+      conversation.isActive = false;
+      await conversation.save();
+
+      res.status(200).json({
+        success: true,
+        message: 'Conversation archivée avec succès'
+      });
+
+    } catch (error) {
+      console.error('Erreur archivage conversation:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Erreur lors de l\'archivage de la conversation'
+      });
+    }
   }
 };
 
-
-
-// export const deleteNews = async (req, res) => {
-//   try {
-//     const { id } = req.params;
-//     const userId = req.user._id;
-
-//     const result = await Chat.deleteOne({
-//       _id: id,
-//       isNews: true,
-//       newsAuthor: userId
-//     });
-
-//     if (result.deletedCount === 0) {
-//       return res.status(404).json({ message: 'News not found or unauthorized' });
-//     }
-    
-//     res.status(200).json({ message: 'News deleted successfully' });
-//   } catch (error) {
-//     res.status(500).json({ message: error.message });
-//   }
-// };
-
-
-export const updateNewsV2 = async (req, res) => {
+// Contrôleur pour les messages
+export const messageController = {
+sendMessage: async (req, res) => {
   try {
-    const { id } = req.params;
-    const userId = req.rootUserId;
-    const updates = req.body;
+    const { conversationId, content } = req.body;
+    const userId = req.user._id;
+    const files = req.files || [];
 
-    // 1. Validation de l'ID
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ message: 'ID de news invalide' });
-    }
-
-    // 2. Trouver la news avec vérification de l'auteur
-    const news = await Chat.findOne({
-      _id: id,
-      isNews: true,
-      newsAuth: userId // Correction: utiliser newsAuth au lieu de newsAuthor
+    // Vérifier que la conversation existe et que l'utilisateur en fait partie
+    const conversation = await Conversation.findOne({
+      _id: conversationId,
+      participants: userId,
+      isActive: true
     });
 
-    if (!news) {
-      return res.status(404).json({ 
-        message: 'News non trouvée ou non autorisée',
-        details: `L'utilisateur ${userId} n'est pas l'auteur de cette news`
+    if (!conversation) {
+      // Supprimer les fichiers uploadés si la conversation n'existe pas
+      if (files.length > 0) {
+        files.forEach(async (file) => {
+          try {
+            await deleteCloudinaryFile(file.filename);
+          } catch (error) {
+            console.error('Erreur suppression fichier:', error);
+          }
+        });
+      }
+
+      return res.status(404).json({
+        success: false,
+        error: 'Conversation introuvable ou inaccessible'
       });
     }
 
-    // 3. Liste des champs modifiables
-    const allowedUpdates = ['chatName', 'description', 'photo', 'status'];
-    const isValidUpdate = Object.keys(updates).every(update => 
-      allowedUpdates.includes(update)
+    // Trouver le destinataire
+    const receiverId = conversation.participants.find(
+      id => id.toString() !== userId.toString()
     );
 
-    if (!isValidUpdate) {
-      return res.status(400).json({ 
-        message: 'Champs de mise à jour non autorisés',
-        allowedFields: allowedUpdates,
-        invalidFields: invalidFields 
+    // Vérifier que le contenu ou les fichiers sont présents
+    if ((!content || content.trim() === '') && files.length === 0) {
+      // Supprimer les fichiers uploadés si aucun contenu
+      if (files.length > 0) {
+        files.forEach(async (file) => {
+          try {
+            await deleteCloudinaryFile(file.filename);
+          } catch (error) {
+            console.error('Erreur suppression fichier:', error);
+          }
+        });
+      }
+
+      return res.status(400).json({
+        success: false,
+        error: 'Le message ne peut pas être vide'
       });
     }
 
-    // 4. Application des modifications
-    Object.keys(updates).forEach(update => {
-      news[update] = updates[update];
+    // Préparer les pièces jointes
+    const attachments = files.map(file => ({
+      url: file.path,
+      filename: file.originalname,
+      mimetype: file.mimetype,
+      size: file.size,
+      cloudinaryPublicId: file.filename
+    }));
+
+    // Créer le message
+    const message = await Message.create({
+      conversation: conversationId,
+      sender: userId,
+      receiver: receiverId,
+      content: content?.trim() || '',
+      attachments: attachments
     });
 
-    const updatedNews = await news.save();
+    // Mettre à jour la dernière conversation
+    conversation.lastMessage = message._id;
+    await conversation.save();
 
-    // 5. Réponse avec la news mise à jour
-    res.status(200).json({
+    // Populer les informations de l'expéditeur
+    await message.populate('sender', 'firstName lastName username email avatar');
+
+    // Émettre l'événement Socket.IO
+    if (req.io) {
+      const socketData = {
+        conversationId,
+        message: {
+          _id: message._id,
+          content: message.content,
+          sender: message.sender,
+          attachments: message.attachments,
+          isRead: message.isRead,
+          createdAt: message.createdAt,
+          updatedAt: message.updatedAt
+        }
+      };
+
+      // Envoyer à tous les participants de la conversation
+      req.io.to(`conversation:${conversationId}`).emit('new-message', socketData);
+
+      // Notifier le destinataire s'il n'est pas dans la conversation
+      const sockets = req.io.sockets.sockets;
+      const isReceiverInConversation = Array.from(sockets.values()).some(
+        socket => socket.userId === receiverId.toString() && 
+                 socket.rooms.has(`conversation:${conversationId}`)
+      );
+
+      if (!isReceiverInConversation) {
+        req.io.to(`user:${receiverId}`).emit('new-message-notification', {
+          conversationId,
+          message: {
+            _id: message._id,
+            content: message.content.substring(0, 100),
+            sender: message.sender,
+            createdAt: message.createdAt
+          }
+        });
+      }
+    }
+
+    res.status(201).json({
       success: true,
-      message: 'News mise à jour avec succès',
-      news: updatedNews
+      message: 'Message envoyé avec succès',
+      data: message
     });
 
   } catch (error) {
-    console.error('Erreur lors de la mise à jour:', error);
-    res.status(500).json({ 
+    console.error('Erreur envoi message:', error);
+    
+    // Supprimer les fichiers uploadés en cas d'erreur
+    if (req.files && req.files.length > 0) {
+      req.files.forEach(async (file) => {
+        try {
+          await deleteCloudinaryFile(file.filename);
+        } catch (error) {
+          console.error('Erreur suppression fichier après erreur:', error);
+        }
+      });
+    }
+
+    res.status(500).json({
       success: false,
-      message: 'Erreur serveur lors de la mise à jour',
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      error: 'Erreur lors de l\'envoi du message'
     });
   }
-};
+},
+  // Obtenir les messages d'une conversation
+  getMessages: async (req, res) => {
+    try {
+      const { conversationId } = req.params;
+      const userId = req.user._id;
+      const { page = 1, limit = 50 } = req.query;
 
-export const acceptNews = async(req, res) =>{
-  try {
-        const form = await Chat.findByIdAndUpdate(
-          req.params.id,
-          { status: 'accepted' },
-          { new: true }
-        );
-        
-        if (!form) {
-          return res.status(404).json({
-            success: false,
-            message: 'News non trouvé'
+      // Vérifier que l'utilisateur a accès à la conversation
+      const conversation = await Conversation.findOne({
+        _id: conversationId,
+        participants: userId
+      });
+
+      if (!conversation) {
+        return res.status(404).json({
+          success: false,
+          error: 'Conversation introuvable ou inaccessible'
+        });
+      }
+
+      // Calculer la pagination
+      const skip = (parseInt(page) - 1) * parseInt(limit);
+
+      // Récupérer les messages
+      const messages = await Message.find({ conversation: conversationId })
+        .populate('sender', 'firstName lastName username email avatar')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit));
+
+      // Compter le total des messages
+      const total = await Message.countDocuments({ conversation: conversationId });
+
+      // Marquer les messages comme lus (seulement ceux destinés à l'utilisateur)
+      await Message.updateMany(
+        {
+          conversation: conversationId,
+          receiver: userId,
+          isRead: false
+        },
+        {
+          isRead: true,
+          readAt: new Date()
+        }
+      );
+
+      res.status(200).json({
+        success: true,
+        messages: messages.reverse(), // Remettre dans l'ordre chronologique
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          pages: Math.ceil(total / limit)
+        }
+      });
+
+      // Notifier l'expéditeur que ses messages ont été lus
+      if (req.io) {
+        const unreadMessages = await Message.find({
+          conversation: conversationId,
+          sender: { $ne: userId },
+          receiver: userId,
+          isRead: false
+        });
+
+        if (unreadMessages.length > 0) {
+          const otherParticipant = conversation.participants.find(
+            id => id.toString() !== userId.toString()
+          );
+
+          req.io.to(otherParticipant.toString()).emit('messages-read', {
+            conversationId,
+            readBy: userId,
+            messageIds: unreadMessages.map(msg => msg._id)
           });
         }
-  
-        return res.json({
-          success: true,
-          message: 'News accepté',
-        });
-  
-      } catch (err) {
-        console.error('Erreur accept News:', err);
-        return res.status(500).json({
+      }
+
+    } catch (error) {
+      console.error('Erreur récupération messages:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Erreur lors de la récupération des messages'
+      });
+    }
+  },
+
+  // Supprimer un message
+  deleteMessage: async (req, res) => {
+    try {
+      const { messageId } = req.params;
+      const userId = req.user._id;
+
+      const message = await Message.findById(messageId);
+
+      if (!message) {
+        return res.status(404).json({
           success: false,
-          message: 'Erreur lors de l\'acceptation du news'
+          error: 'Message introuvable'
         });
       }
-}
 
-export const declinedNews = async(req, res) =>{
-  try {
-        const form = await Chat.findByIdAndUpdate(
-          req.params.id,
-          { status: 'declined' },
-          { new: true }
-        );
-    
-        if (!form) return res.status(404).json({ error: 'News non trouvé' });
-        
-        return res.json({ message: 'News refusé', form });
-    
-      } catch (err) {
-        console.error('Erreur:', err);
-        return res.status(500).json({ error: 'Erreur serveur' });
+      // Vérifier que l'utilisateur est l'expéditeur
+      if (message.sender.toString() !== userId.toString()) {
+        return res.status(403).json({
+          success: false,
+          error: 'Vous ne pouvez supprimer que vos propres messages'
+        });
       }
-}
 
-export const pendingNews = async(req, res) =>{
-  try {
-        const form = await Chat.findByIdAndUpdate(
-          req.params.id,
-          { status: 'pending' },
-          { new: true }
-        );
-    
-        if (!form) return res.status(404).json({ error: 'News non trouvé' });
-    
-        
-        return res.json({ message: 'News en attente de validation', form });
-    
-      } catch (err) {
-        console.error('Erreur:', err);
-        return res.status(500).json({ error: 'Erreur serveur' });
+      // Vérifier que le message n'a pas plus de 1 heure
+      const messageAge = Date.now() - new Date(message.createdAt).getTime();
+      const oneHour = 60 * 60 * 1000;
+
+      if (messageAge > oneHour) {
+        return res.status(400).json({
+          success: false,
+          error: 'Vous ne pouvez supprimer que les messages de moins d\'une heure'
+        });
       }
-}
 
-export const creatGroup = async (req, res) => {
-  const { chatName, users } = req.body;
-  if (!chatName || !users) {
-    res.status(400).json({ message: 'Please fill the fields' });
-  }
-  const parsedUsers = JSON.parse(users);
-  if (parsedUsers.length < 2)
-    res.send(400).send('Group should contain more than 2 users');
-  parsedUsers.push(req.rootUser);
-  try {
-    const chat = await Chat.create({
-      chatName: chatName,
-      users: parsedUsers,
-      isGroup: true,
-      groupAdmin: req.rootUserId,
-    });
-    const createdChat = await Chat.findOne({ _id: chat._id })
-      .populate('users', '-password')
-      .populate('groupAdmin', '-password');
-    // res.status(200).json(createdChat);
-    res.send(createdChat);
-  } catch (error) {
-    res.sendStatus(500);
-  }
-};
-
-export const renameGroup = async (req, res) => {
-  const { chatId, chatName } = req.body;
-  if (!chatId || !chatName)
-    res.status(400).send('Provide Chat id and Chat name');
-  try {
-    const chat = await Chat.findByIdAndUpdate(chatId, {
-      $set: { chatName },
-    })
-      .populate('users', '-password')
-      .populate('groupAdmin', '-password');
-    if (!chat) res.status(404);
-    res.status(200).send(chat);
-  } catch (error) {
-    res.status(500).send(error);
-    console.log(error);
-  }
-};
-export const addToGroup = async (req, res) => {
-  const { userId, chatId } = req.body;
-  const existing = await Chat.findOne({ _id: chatId });
-  if (!existing.users.includes(userId)) {
-    const chat = await Chat.findByIdAndUpdate(chatId, {
-      $push: { users: userId },
-    })
-      .populate('groupAdmin', '-password')
-      .populate('users', '-password');
-    if (!chat) res.status(404);
-    res.status(200).send(chat);
-  } else {
-    res.status(409).send('user already exists');
-  }
-};
-export const removeFromGroup = async (req, res) => {
-  const { userId, chatId } = req.body;
-  const existing = await Chat.findOne({ _id: chatId });
-  if (existing.users.includes(userId)) {
-    Chat.findByIdAndUpdate(chatId, {
-      $pull: { users: userId },
-    })
-      .populate('groupAdmin', '-password')
-      .populate('users', '-password')
-      .then((e) => res.status(200).send(e))
-      .catch((e) => res.status(404));
-  } else {
-    res.status(409).send('user doesnt exists');
-  }
-};
-
-export const addComment = async (req, res) =>{
-    const { id } = req.params;
-    const { comment } = req.body;
-    const cmt = await Chat.findByIdAndUpdate(id, { comment });
-    res.json(cmt);
-}
-
-export const getComment = async (req, res) => {
-  try {
-      const data = await Chat.find(); // Fetch all data
-      const totalLength = await Chat.countDocuments(); // Get total count
-
-      res.json({ totalLength, data });
-  } catch (error) {
-      res.status(500).json({ message: "Server Error", error });
-  }
-}
-
-
-export const disLikesComment = async (req, res) => {
-  const { postId, userId } = req.body;
-
-  try {
-    const post = await Chat.findById(postId);
-
-    if (!post) {
-      return res.status(404).json({ message: 'Post not found' });
-    }
-
-    // Check if the user has already disliked the post
-    if (post.dislikedBy.includes(userId)) {
-      return res.status(400).json({ message: 'You have already disliked this post' });
-    }
-
-    // Check if the user has liked the post, and remove the like if so
-    if (post.likedBy.includes(userId)) {
-      post.likedBy.pull(userId);
-      post.likes -= 1;
-    }
-    // Add the user to the dislikedBy array and increment the dislikes count
-    post.dislikedBy.push(userId);
-    post.dislikes += 1;
-
-    await post.save();
-
-    res.status(200).json(post);
-  } catch (error) {
-    res.status(500).json({ message: 'Something went wrong' });
-  }
-};
-
-export const removeContact = async (req, res) => {};
-
-
-
-export const likeCt = async (req, res) => {
-  const { postId, userId } = req.body;
-
-  // Check if postId and userId are provided
-  if (!postId || !userId) {
-    return res.status(400).json({ message: 'postId and userId are required' });
-  }
-
-  try {
-    const post = await Chat.findById(postId);
-
-    if (!post) {
-      return res.status(404).json({ message: 'Post not found' });
-    }
-
-    // Check if the user has already liked the post
-    if (post.likedBy.includes(userId)) {
-      return res.status(400).send({ message: 'You have already liked this post' });
-    }
-
-    // Check if the user has disliked the post, and remove the dislike if so
-    if (post.dislikedBy.includes(userId)) {
-      post.dislikedBy.pull(userId);
-      post.dislikes -= 1;
-    }
-
-    // Add the user to the likedBy array and increment the likes count
-    post.likedBy.push(userId);
-    post.likes += 1;
-
-    await post.save();
-
-    res.status(200).send({ message: 'You have liked this post',post});
-  } catch (error) {
-    console.error(error); // Log the error for debugging
-    res.status(500).json({ message: 'Something went wrong' });
-  }
-};
-
-export const deleteNews = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const userId = req.rootUserId;
-
-    const result = await Chat.deleteOne({
-      _id: id,
-      isNews: true,
-      newsAuthor: userId
-    });
-
-    if (result.deletedCount === 0) {
-      return res.status(404).json({ message: 'News not found or unauthorized' });
-    }
-    
-    res.status(200).json({ message: 'News deleted successfully' });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-// export const deleteNews =  async (req, res) => {
-//   const { id } = req.params;
-
-//   try {
-//     // Find the post by ID and delete it
-//     const deletedPost = await Chat.findByIdAndDelete(id);
-
-//     if (!deletedPost) {
-//       return res.status(404).json({ message: 'News not found' });
-//     }
-
-//     res.status(200).json({ message: 'News supprimer avec succès', deletedPost });
-//   } catch (error) {
-//     console.error(error);
-//     res.status(500).json({ message: 'Something went wrong' });
-//   }
-// }
-
-const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(id);
-
-// Controller for liking a news
-export const likeNews = async (req, res) => {
-    try {
-        const { newsId } = req.params;
-        const userId = req.rootUserId; // Assuming user is authenticated and ID is available
-
-        // Validate IDs
-        if (!isValidObjectId(newsId) || !isValidObjectId(userId)) {
-            return res.status(400).json({ message: 'Invalid ID format' });
+      // Supprimer les fichiers Cloudinary associés
+      if (message.attachments && message.attachments.length > 0) {
+        for (const attachment of message.attachments) {
+          if (attachment.cloudinaryPublicId) {
+            try {
+              await deleteCloudinaryFile(attachment.cloudinaryPublicId);
+            } catch (error) {
+              console.error('Erreur suppression fichier Cloudinary:', error);
+            }
+          }
         }
+      }
 
-        // Find the news
-        const news = await Chat.findOne({ 
-            _id: newsId, 
-            isNews: true 
+      // Supprimer le message
+      await message.deleteOne();
+
+      res.status(200).json({
+        success: true,
+        message: 'Message supprimé avec succès'
+      });
+
+      // Notifier via Socket.IO
+      if (req.io) {
+        req.io.to(message.receiver.toString()).emit('message-deleted', {
+          conversationId: message.conversation,
+          messageId: message._id,
+          deletedBy: userId
         });
 
-        if (!news) {
-            return res.status(404).json({ message: 'News not found' });
+        // Mettre à jour la dernière conversation si nécessaire
+        const lastMessage = await Message.findOne({ conversation: message.conversation })
+          .sort({ createdAt: -1 });
+
+        const conversationUpdate = {
+          _id: message.conversation,
+          lastMessage: lastMessage?._id || null,
+          updatedAt: new Date()
+        };
+
+        const conversation = await Conversation.findById(message.conversation);
+        if (conversation) {
+          conversation.participants.forEach(participantId => {
+            req.io.to(participantId.toString()).emit('conversation-updated', conversationUpdate);
+          });
         }
-
-        // Check if user already liked
-        const alreadyLiked = news.likedBy.includes(userId);
-        const alreadyDisliked = news.dislikedBy.includes(userId);
-
-        let updatedNews;
-
-        if (alreadyLiked) {
-            // Remove like if already liked
-            updatedNews = await Chat.findByIdAndUpdate(
-                newsId,
-                { 
-                    $inc: { likes: -1 },
-                    $pull: { likedBy: userId } 
-                },
-                { new: true }
-            );
-        } else {
-            // Add like
-            updatedNews = await Chat.findByIdAndUpdate(
-                newsId,
-                { 
-                    $inc: { likes: 1 },
-                    $addToSet: { likedBy: userId },
-                    // Remove from dislikes if previously disliked
-                    ...(alreadyDisliked && { 
-                        $inc: { dislikes: -1 },
-                        $pull: { dislikedBy: userId } 
-                    })
-                },
-                { new: true }
-            );
-        }
-
-        res.status(200).json({
-            message: alreadyLiked ? 'Like removed' : 'News liked',
-            news: updatedNews
-        });
+      }
 
     } catch (error) {
-        console.error('Error liking news:', error);
-        res.status(500).json({ 
-            message: 'Server error', 
-            error: error.message 
-        });
+      console.error('Erreur suppression message:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Erreur lors de la suppression du message'
+      });
     }
-};
+  },
 
-// Controller for disliking a news
-export const dislikeNews = async (req, res) => {
+  // Marquer les messages comme lus
+  markAsRead: async (req, res) => {
     try {
-        const { newsId } = req.params;
-        const userId = req.rootUserId;
+      const { conversationId } = req.params;
+      const userId = req.user._id;
 
-        // Validate IDs
-        if (!isValidObjectId(newsId) || !isValidObjectId(userId)) {
-            return res.status(400).json({ message: 'Invalid ID format' });
-        }
+      // Vérifier que l'utilisateur a accès à la conversation
+      const conversation = await Conversation.findOne({
+        _id: conversationId,
+        participants: userId
+      });
 
-        // Find the news
-        const news = await Chat.findOne({ 
-            _id: newsId, 
-            isNews: true 
+      if (!conversation) {
+        return res.status(404).json({
+          success: false,
+          error: 'Conversation introuvable ou inaccessible'
         });
+      }
 
-        if (!news) {
-            return res.status(404).json({ message: 'News not found' });
+      // Marquer tous les messages non lus comme lus
+      const result = await Message.updateMany(
+        {
+          conversation: conversationId,
+          receiver: userId,
+          isRead: false
+        },
+        {
+          isRead: true,
+          readAt: new Date()
         }
+      );
 
-        // Check if user already disliked
-        const alreadyDisliked = news.dislikedBy.includes(userId);
-        const alreadyLiked = news.likedBy.includes(userId);
+      res.status(200).json({
+        success: true,
+        message: `${result.modifiedCount} messages marqués comme lus`,
+        modifiedCount: result.modifiedCount
+      });
 
-        let updatedNews;
-
-        if (alreadyDisliked) {
-            // Remove dislike if already disliked
-            updatedNews = await Chat.findByIdAndUpdate(
-                newsId,
-                { 
-                    $inc: { dislikes: -1 },
-                    $pull: { dislikedBy: userId } 
-                },
-                { new: true }
-            );
-        } else {
-            // Add dislike
-            updatedNews = await Chat.findByIdAndUpdate(
-                newsId,
-                { 
-                    $inc: { dislikes: 1 },
-                    $addToSet: { dislikedBy: userId },
-                    // Remove from likes if previously liked
-                    ...(alreadyLiked && { 
-                        $inc: { likes: -1 },
-                        $pull: { likedBy: userId } 
-                    })
-                },
-                { new: true }
-            );
-        }
-
-        res.status(200).json({
-            message: alreadyDisliked ? 'Dislike removed' : 'News disliked',
-            news: updatedNews
-        });
-
-    } catch (error) {
-        console.error('Error disliking news:', error);
-        res.status(500).json({ 
-            message: 'Server error', 
-            error: error.message 
-        });
-    }
-};
-
-// Controller to get like/dislike status for current user
-export const getNewsReactionStatus = async (req, res) => {
-    try {
-        const { newsId } = req.params;
-        const userId = req.rootUserId;
-
-        if (!isValidObjectId(newsId) || !isValidObjectId(userId)) {
-            return res.status(400).json({ message: 'Invalid ID format' });
-        }
-
-        const news = await Chat.findOne(
-            { _id: newsId, isNews: true },
-            { likedBy: 1, dislikedBy: 1 }
+      // Notifier l'expéditeur via Socket.IO
+      if (req.io && result.modifiedCount > 0) {
+        const otherParticipant = conversation.participants.find(
+          id => id.toString() !== userId.toString()
         );
 
-        if (!news) {
-            return res.status(404).json({ message: 'News not found' });
-        }
-
-        res.status(200).json({
-            hasLiked: news.likedBy.includes(userId),
-            hasDisliked: news.dislikedBy.includes(userId),
-            likeCount: news.likedBy.length,
-            dislikeCount: news.dislikedBy.length
+        req.io.to(otherParticipant.toString()).emit('messages-read', {
+          conversationId,
+          readBy: userId,
+          count: result.modifiedCount
         });
+      }
 
     } catch (error) {
-        console.error('Error getting reaction status:', error);
-        res.status(500).json({ 
-            message: 'Server error', 
-            error: error.message 
-        });
+      console.error('Erreur marquage messages lus:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Erreur lors du marquage des messages comme lus'
+      });
     }
-};
-
-// Signalement d'une news
-export const reportNews = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { reason, description } = req.body;
-    const userId = req.rootUserId;
-
-    const chat = await Chat.findById(id);
-    if (!chat) return res.status(404).json({ message: 'News not found' });
-
-    // Vérifier si l'utilisateur a déjà signalé cette news
-    const alreadyReported = chat.reports.some(report => 
-      report.reportedBy.equals(userId) && report.status === 'pending'
-    );
-
-    if (alreadyReported) {
-      return res.status(400).json({ message: 'Vous avez déjà signalé cette news' });
-    }
-
-    chat.reports.push({
-      reportedBy: userId,
-      reason,
-      description,
-      status: 'pending'
-    });
-
-    chat.reportCount = chat.reports.length;
-
-    // Bloquer automatiquement si trop de signalements
-    if (chat.reportCount >= 5) {
-      chat.isBlocked = true;
-    }
-
-    await chat.save();
-
-    res.json({
-      ...chat.toObject(),
-      hasReported: true
-    });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-// Traitement d'un signalement (admin)
-export const handleReport = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const userId = req.user._id;
-
-    const chat = await Chat.findById(id);
-    if (!chat) return res.status(404).json({ message: 'News not found' });
-
-    const hasReported = chat.reports.some(report => 
-      report.reportedBy.equals(userId) && report.status === 'pending'
-    );
-
-    res.json({
-      hasReported,
-      reports: chat.reports,
-      reportCount: chat.reportCount
-    });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
   }
 };
