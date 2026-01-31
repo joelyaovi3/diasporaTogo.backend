@@ -50,7 +50,53 @@ const userSchema = new mongoose.Schema({
     },
     default: null
   },
+   website: {
+    type: String,
+    default: null,
+    trim: true,
+    sparse: true,
+    index: true,
+    required: function() {
+      // Ne pas rendre required si l'utilisateur est un particulier
+      return this.userType === 'Entreprise';
+    },
+    validate: {
+      validator: function(v) {
+        // Si c'est une entreprise et que le champ est fourni, valider
+        if (this.userType === 'Entreprise' && v) {
+          return /^(https?:\/\/)?([a-z0-9-]+(\.[a-z0-9-]+)+)(\/.*)?$/i.test(v);
+        }
+        // Pour les particuliers ou si vide, c'est OK
+        return true;
+      },
+      message: props => `${props.value} n'est pas une URL valide!`
+    }
+  },
   
+  cfe: {
+    type: String,
+    default: null,
+    trim: true,
+    uppercase: true,
+    sparse: true,
+    unique: true,
+    required: function() {
+      // Ne pas rendre required si l'utilisateur est un particulier
+      return this.userType === 'Entreprise';
+    },
+    validate: {
+      validator: function(v) {
+        // Si c'est une entreprise et que le champ est fourni, valider
+        if (this.userType === 'Entreprise' && v) {
+          return /^[A-Z0-9\-]{3,30}$/.test(v);
+        }
+        // Pour les particuliers ou si vide, c'est OK
+        return true;
+      },
+      message: props => `${props.value} n'est pas un identifiant CFE valide`
+    }
+  },
+
   // Champs communs
   email: {
     type: String,
@@ -150,7 +196,18 @@ const userSchema = new mongoose.Schema({
   }
 }, {
   timestamps: true,
-  toJSON: { virtuals: true },
+  toJSON: {
+    virtuals: true,
+    transform: function(doc, ret) {
+      // Supprimer champs sensibles/techniques
+      delete ret.password;
+      delete ret.verificationCode;
+      delete ret.verificationCodeExpires;
+      delete ret.revokedTokens;
+      delete ret.__v;
+      return ret;
+    }
+  },
   toObject: { virtuals: true }
 });
 
@@ -266,6 +323,18 @@ userSchema.pre('validate', function(next) {
   if (this.userName) {
     this.userName = this.userName.toLowerCase().trim();
   }
+
+  // Normalisation du website et du cfe
+  if (this.website) {
+    this.website = this.website.trim();
+    if (!/^https?:\/\//i.test(this.website)) {
+      this.website = `https://${this.website}`;
+    }
+  }
+
+  if (this.cfe) {
+    this.cfe = this.cfe.toUpperCase().replace(/[^A-Z0-9\-]/g, '');
+  }
   
   next();
 });
@@ -363,6 +432,12 @@ userSchema.virtual('isPaymentRequired').get(function() {
 userSchema.virtual('requiresPayment').get(function() {
   return this.userType !== 'Particulier'; // Paiement pour Company et Freelance
 });
+
+// Indexes pour optimiser les requêtes et garantir unicité lorsque pertinent
+userSchema.index({ userName: 1 }, { unique: true, sparse: true });
+userSchema.index({ email: 1 }, { unique: true });
+userSchema.index({ website: 1 }, { sparse: true });
+userSchema.index({ cfe: 1 }, { unique: true, sparse: true });
 
 const User = mongoose.model('User', userSchema);
 export default User;

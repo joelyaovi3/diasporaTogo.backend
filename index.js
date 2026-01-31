@@ -18,6 +18,7 @@ const app = express();
 
 const allowedOrigins = [
   'http://localhost:3000',
+  'http://localhost:3001',
   'https://diasporatogo-teal.vercel.app',
   'https://diasporatogo.com',
 ];

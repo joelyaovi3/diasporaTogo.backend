@@ -23,93 +23,6 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// export const login = async (req, res) => {
-//   try {
-//     const { email, password } = req.body;
-
-//     // Trouver l'utilisateur
-//     const foundUser = await user.findOne({ email });
-//     if (!foundUser) {
-//       return res.status(401).json({
-//         success: false,
-//         message: 'Email ou mot de passe incorrect'
-//       });
-//     }
-
-//     // Vérifier si le compte est validé
-//     if (!foundUser.isValid) {
-//       return res.status(403).json({
-//         success: false,
-//         message: 'Veuillez vérifier votre compte avant de vous connecter'
-//       });
-//     }
-
-//     // Vérifier si le compte est rejeté
-//     if (foundUser.isRejet) {
-//       return res.status(403).json({
-//         success: false,
-//         message: 'Votre compte a été rejeté. Contactez l\'administration pour plus d\'informations'
-//       });
-//     }
-
-//     // Vérifier le mot de passe
-//     const isPasswordValid = await foundUser.comparePassword(password);
-//     if (!isPasswordValid) {
-//       return res.status(401).json({
-//         success: false,
-//         message: 'Email ou mot de passe incorrect'
-//       });
-//     }
-
-//     // Générer le token JWT
-//     const token = await foundUser.generateAuthToken();
-    
-//     // Ajouter le token à la liste des tokens de l'utilisateur
-//     await foundUser.addToken(token, req.headers['user-agent'], req.ip);
-    
-//     // Mettre à jour la dernière connexion
-//     foundUser.lastLogin = new Date();
-//     await foundUser.save();
-
-//     // Réponse formatée comme le premier backend (sans cookie)
-//     res.status(200).json({
-//       success: true,
-//       message: 'Connexion réussie',
-//       data: {
-//         token,
-//         user: {
-//           id: foundUser._id,
-//           email: foundUser.email,
-//           name: foundUser.name,
-//           username: foundUser.username,
-//           role: foundUser.role,
-//           first_name: foundUser.name?.split(' ')[0] || '',
-//           last_name: foundUser.name?.split(' ').slice(1).join(' ') || '',
-//           isValid: foundUser.isValid,
-//           isRejet: foundUser.isRejet,
-//           avatar: foundUser.avatar,
-//           profession: foundUser.profession,
-//           phoneNumber: foundUser.phoneNumber,
-//           town: foundUser.town,
-//           country: foundUser.country,
-//           bio: foundUser.bio,
-//           typeUser: foundUser.typeUser,
-//           paymentVerified: foundUser.paymentVerified,
-//           stripeCustomerId: foundUser.stripeCustomerId,
-//           createdAt: foundUser.createdAt,
-//           updatedAt: foundUser.updatedAt
-//         }
-//       }
-//     });
-//   } catch (error) {
-//     console.error('Erreur lors de la connexion:', error);
-//     res.status(500).json({
-//       success: false,
-//       message: 'Erreur interne du serveur'
-//     });
-//   }
-// };
-
 export const login = async (req, res) => {
   const { email, password } = req.body;
 
@@ -245,292 +158,7 @@ export const login = async (req, res) => {
   }
 };
 
-// export const register = async (req, res) => {
-//   const { 
-//     firstname, 
-//     lastname,
-//     username, 
-//     email, 
-//     password,
-//     phoneNumber, 
-//     profession,
-//     country,
-//     town,
-//     typeUser, // "individual" ou "company" (type d'utilisateur)
-//     accountType, // "free" ou "premium" (type de compte)
-//     paymentMethodId // ID de la méthode de paiement Stripe (pour premium)
-//   } = req.body;
 
-//   try {
-//     // 1. Vérification de l'utilisateur existant
-//     let existingUser = await User.findOne({ email });
-
-//     if (existingUser && existingUser.isValid) {
-//       return res.status(400).json({ 
-//         message: "Un utilisateur avec cet email existe déjà" 
-//       });
-//     }
-
-//     // 2. Génération OTP (pour tous les utilisateurs)
-//     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-//     const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
-
-//     // 3. Déterminer le rôle et les caractéristiques selon typeUser
-//     let userRole = 'User'; // Rôle par défaut
-//     let requiresPayment = false;
-//     let isPremiumAccount = false;
-//     let stripeCustomerId = null;
-//     let paymentIntentId = null;
-//     let subscriptionPrice = null;
-
-//     // Configuration basée sur le type d'utilisateur et type de compte
-//     switch(typeUser) {
-//       case 'individual':
-//         userRole = 'Individual';
-//         if (accountType === 'premium') {
-//           requiresPayment = true;
-//           isPremiumAccount = true;
-//           subscriptionPrice = 990; // 9.90€ pour individu premium
-//         }
-//         break;
-        
-//       case 'company':
-//         userRole = 'Company';
-//         if (accountType === 'premium') {
-//           requiresPayment = true;
-//           isPremiumAccount = true;
-//           subscriptionPrice = 2990; // 29.90€ pour entreprise premium
-//         }
-//         break;
-        
-//       case 'freelancer':
-//         userRole = 'Freelancer';
-//         if (accountType === 'premium') {
-//           requiresPayment = true;
-//           isPremiumAccount = true;
-//           subscriptionPrice = 1490; // 14.90€ pour freelancer premium
-//         }
-//         break;
-        
-//       default:
-//         userRole = 'User';
-//         accountType = 'free';
-//     }
-
-//     // 4. Traitement du paiement pour les comptes premium
-//     if (requiresPayment && paymentMethodId) {
-//       // Créer un client Stripe
-//       const customer = await stripe.customers.create({
-//         email,
-//         name: `${firstname} ${lastname}`,
-//         phone: phoneNumber,
-//         metadata: {
-//           typeUser,
-//           accountType,
-//           profession,
-//           country
-//         }
-//       });
-      
-//       stripeCustomerId = customer.id;
-
-//       // Créer un PaymentIntent
-//       const paymentIntent = await stripe.paymentIntents.create({
-//         amount: subscriptionPrice,
-//         currency: 'eur',
-//         customer: customer.id,
-//         payment_method: paymentMethodId,
-//         description: `Abonnement ${typeUser} ${accountType} - ${username}`,
-//         metadata: {
-//           typeUser,
-//           accountType,
-//           plan: 'premium'
-//         },
-//         confirm: true,
-//         return_url: `${process.env.BASE_URL}/payment-success?email=${encodeURIComponent(email)}`
-//       });
-
-//       paymentIntentId = paymentIntent.id;
-
-//       // Vérifier si le paiement a réussi
-//       if (paymentIntent.status !== 'succeeded') {
-//         return res.status(400).json({
-//           message: "Le paiement a échoué",
-//           paymentStatus: paymentIntent.status,
-//           clientSecret: paymentIntent.client_secret,
-//           requiresAction: paymentIntent.status === 'requires_action'
-//         });
-//       }
-//     }
-
-//     // 5. Préparation des données utilisateur
-//     const userData = {
-//       email,
-//       name: `${firstname} ${lastname}`,
-//       phoneNumber,
-//       profession,
-//       username,
-//       password,
-//       country,
-//       town,
-//       typeUser, // Type d'utilisateur: individual, company, freelancer
-//       role: userRole, // Rôle dans l'application: Individual, Company, Freelancer, etc.
-//       otp,
-//       otpExpires,
-//       stripeCustomerId,
-//       paymentIntentId,
-//       paymentVerified: isPremiumAccount,
-//       accountType, // free ou premium
-//       isValid: isPremiumAccount ? true : false, // Premium validé immédiatement, free besoin OTP
-//       bio: accountType === 'premium' ? 'Compte Premium' : 'Available'
-//     };
-
-//     // 6. Création ou mise à jour de l'utilisateur
-//     if (!existingUser) {
-//       existingUser = new User(userData);
-//     } else {
-//       // Préserver certaines données existantes
-//       const preserveFields = ['contacts', 'file', 'avatar', 'createdAt'];
-//       preserveFields.forEach(field => {
-//         if (existingUser[field]) {
-//           userData[field] = existingUser[field];
-//         }
-//       });
-//       Object.assign(existingUser, userData);
-//     }
-
-//     await existingUser.save();
-
-//     // 7. Envoi de l'email de confirmation
-//     const transporter = nodemailer.createTransport({
-//       host: process.env.EMAIL_SERVICE || 'smtp.gmail.com',
-//       port: 465,
-//       secure: true,
-//       auth: {
-//         user: process.env.EMAIL_USER,
-//         pass: process.env.EMAIL_PASSWORD
-//       }
-//     });
-
-//     // Déterminer le sujet de l'email
-//     let emailSubject = '';
-//     let emailContent = '';
-    
-//     if (isPremiumAccount) {
-//       emailSubject = `Confirmation de votre compte ${typeUser} Premium`;
-//       emailContent = `
-//         <p>Votre inscription en tant que ${typeUser} premium a été confirmée avec succès.</p>
-//         <p><strong>Type de compte :</strong> ${typeUser.charAt(0).toUpperCase() + typeUser.slice(1)} Premium</p>
-//         <p><strong>Rôle :</strong> ${userRole}</p>
-//         <p><strong>Forfait :</strong> Premium (${subscriptionPrice/100}€)</p>
-//         <p>Vous avez maintenant accès à toutes les fonctionnalités premium.</p>
-//         <p>Votre compte a été automatiquement validé grâce à votre paiement.</p>
-//       `;
-//     } else {
-//       emailSubject = 'Vérification de votre compte';
-//       emailContent = `
-//         <p>Votre code OTP de vérification est :</p>
-//         <div style="background-color: #f4f4f4; padding: 15px; text-align: center; 
-//                     font-size: 24px; font-weight: bold; letter-spacing: 5px; margin: 20px 0;">
-//           ${otp}
-//         </div>
-//         <p>Ce code expire dans 10 minutes.</p>
-//         <p><strong>Type de compte :</strong> ${typeUser} (Gratuit)</p>
-//         <p><strong>Rôle :</strong> ${userRole}</p>
-//       `;
-//     }
-
-//     const mailOptions = {
-//       from: process.env.EMAIL_USER,
-//       to: email,
-//       subject: emailSubject,
-//       html: `
-//         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-//           <h2>${isPremiumAccount ? 'Bienvenue !' : 'Vérification de compte'}</h2>
-//           <p>Bonjour ${firstname} ${lastname},</p>
-//           ${emailContent}
-//           <hr style="margin: 20px 0;" />
-//           <p style="color: #666; font-size: 12px;">
-//             ${isPremiumAccount 
-//               ? 'Merci pour votre confiance ! Accédez à votre tableau de bord pour commencer.' 
-//               : 'Si vous n\'avez pas créé ce compte, ignorez cet email.'}
-//           </p>
-//         </div>
-//       `
-//     };
-
-//     await transporter.sendMail(mailOptions);
-
-//     // 8. Réponse adaptée
-//     const response = {
-//       message: isPremiumAccount 
-//         ? `Inscription ${typeUser} premium confirmée avec succès` 
-//         : "Un code OTP a été envoyé par email",
-//       userType: typeUser,
-//       accountType: accountType,
-//       role: userRole,
-//       email: email,
-//       paymentVerified: isPremiumAccount,
-//       isValid: isPremiumAccount,
-//       redirectUrl: isPremiumAccount 
-//         ? `${process.env.BASE_URL}/dashboard` 
-//         : `${process.env.BASE_URL}/verify?email=${encodeURIComponent(email)}`
-//     };
-
-//     if (isPremiumAccount && paymentIntentId) {
-//       response.paymentId = paymentIntentId;
-//       response.subscriptionPrice = subscriptionPrice / 100;
-//     }
-
-//     if (!isPremiumAccount) {
-//       response.otpRequired = true;
-//     }
-
-//     res.status(200).json(response);
-
-//   } catch (error) {
-//     console.error('Erreur lors de l\'inscription:', error);
-
-//     // Gestion spécifique des erreurs Stripe
-//     if (error.type && error.type.includes('Stripe')) {
-//       return res.status(400).json({
-//         message: "Erreur de traitement du paiement",
-//         error: error.message,
-//         code: error.code
-//       });
-//     }
-
-//     // Gestion des erreurs de validation Mongoose
-//     if (error.name === 'ValidationError') {
-//       const errors = Object.values(error.errors).map(err => err.message);
-//       return res.status(400).json({
-//         message: "Erreur de validation",
-//         errors
-//       });
-//     }
-
-//     res.status(500).json({
-//       message: "Erreur lors de l'inscription",
-//       error: process.env.NODE_ENV === 'development' ? error.message : undefined
-//     });
-//   }
-// };
-
-// // Fonction utilitaire pour convertir typeUser en rôle
-// export const getUserRole = (typeUser, accountType) => {
-//   const roleMap = {
-//     'individual': 'Individual',
-//     'company': 'Company',
-//     'freelancer': 'Freelancer',
-//     'admin': 'Admin',
-//     'moderator': 'Moderator',
-//     'support': 'Support'
-//   };
-  
-//   return roleMap[typeUser] || 'User';
-// };
-
-// // Fonction pour mettre à jour le rôle (pour l'admin)
 export const updateUserRole = async (req, res) => {
   const { userId, newRole } = req.body;
   
@@ -574,71 +202,6 @@ export const updateUserRole = async (req, res) => {
 };
 
 
-// export const register = async (req, res) => {
-//   const { 
-//     firstname, 
-//     lastname,
-//     username, 
-//     email, 
-//     password,
-//     phoneNumber, 
-//     profession,
-//     country,
-//     town,
-//     typeUser
-//   } = req.body;
-
-//   try {
-//     let existingUser = await User.findOne({ email });
-
-//     if (existingUser && existingUser.isValid) {
-//       return res.status(400).json({ message: "L'utilisateur existe déjà" });
-//     }
-
-// 	  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-//     // const otp = otpGenerator.generate(5, { digits: true, alphabets: false, specialChars: false });
-//     const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // OTP expires in 10 minutes
-
-//     if (!existingUser) {
-//       // const hashedPassword = await bcrypt.hash(password, 12);
-//       existingUser = new User({ 
-//         email, 
-//         name: `${firstname} ${lastname}`,
-//         phoneNumber,
-//         profession,
-//         username,
-//         password,
-//         country,
-//         town,
-//         typeUser,
-//         otp, 
-//         otpExpires 
-//       });
-//     } else {
-//       // const hashedPassword = await bcrypt.hash(password, 12);
-//       // existingUser.password = hashedPassword;
-//       existingUser.otp = otp;
-//       existingUser.otpExpires = otpExpires;
-//     }
-
-//     await existingUser.save();
-
-//     await transporter.sendMail({
-//       from: "diasporatogocontact@gmail.com",
-//       to: email,
-//       subject: "Vérifiez votre compte",
-//       text: `Votre code est ${otp}. Il expire dans 10 minutes.`,
-//     });
-
-//     res.status(200).send({ message: "Un code OTP a ete envoyer par mail", redirectUrl: `${process.env.BASE_URL}/verify?email=${email}` });
-//   } catch (error) {
-//     console.log('Error in register ' + error);
-//     res.status(500).send(error);
-//   }
-// };
-
-
-// Fonction utilitaire pour nettoyer les comptes non validés expirés
 const cleanupExpiredUnverifiedAccounts = async () => {
   try {
     const expiryDate = new Date(Date.now() - 24 * 60 * 60 * 1000); // 24 heures
@@ -800,46 +363,6 @@ export const googleAuth = async (req, res) => {
     });
   }
 };
-
-// export const googleAuth = async (req, res) => {
-//   try {
-//     const { tokenId } = req.body;
-//     const client = new OAuth2Client(process.env.CLIENT_ID);
-//     const verify = await client.verifyIdToken({
-//       idToken: tokenId,
-//       audience: process.env.CLIENT_ID,
-//     });
-//     const { email_verified, email, name, picture } = verify.payload;
-//     if (!email_verified) res.json({ message: 'Email Not Verified' });
-//     const userExist = await user.findOne({ email }).select('-password');
-//     if (userExist) {
-//       res.cookie('userToken', tokenId, {
-//         httpOnly: true,
-//         maxAge: 24 * 60 * 60 * 1000,
-//       });
-//       res.status(200).json({ token: tokenId, user: userExist });
-//     } else {
-//       const password = email + process.env.CLIENT_ID;
-//       const newUser = await user({
-//         name: name,
-//         avatar: picture,
-//         password,
-//         email,
-//       });
-//       await newUser.save();
-//       res.cookie('userToken', tokenId, {
-//         httpOnly: true,
-//         maxAge: 24 * 60 * 60 * 1000,
-//       });
-//       res
-//         .status(200)
-//         .json({ message: 'User registered Successfully', token: tokenId });
-//     }
-//   } catch (error) {
-//     res.status(500).json({ error: error });
-//     console.log('error in googleAuth backend' + error);
-//   }
-// };
 
 export const logout = async (req, res) => {
   try {
@@ -1781,65 +1304,6 @@ export const resetPassword = async (req, res) => {
 };
 
 
-
-// export const register = async (req, res) => {
-//   const {
-//     firstname,
-//     lastname,
-//     username,
-//     email,
-//     password,
-//     phoneNumber,
-//     profession,
-//     country,
-//     town,
-//     typeUser
-//   } = req.body;
-
-//   try {
-//     let existingUser = await User.findOne({ email });
-
-//     if (existingUser && existingUser.isValid) {
-//       return res.status(400).json({ message: "L'utilisateur existe déjà" });
-//     }
-
-//     if (!existingUser) {
-//       existingUser = new User({
-//         email,
-//         name: `${firstname} ${lastname}`,
-//         phoneNumber,
-//         profession,
-//         username,
-//         password,
-//         country,
-//         town,
-//         typeUser,
-//       });
-//     } else {
-//       existingUser.password = password;
-//       existingUser.otp = undefined;
-//       existingUser.otpExpires = undefined;
-//       existingUser.paymentVerified = false;
-//     }
-
-//     await existingUser.save();
-
-
-//     const paymentIntent = await createStripePaymentIntent(email, `${firstname} ${lastname}`);
-
-//     res.status(200).json({
-//       message: "Veuillez compléter le paiement de vérification",
-//       clientSecret: paymentIntent.clientSecret,
-//       customerId: paymentIntent.customerId,
-//       paymentIntentId: paymentIntent.paymentIntentId
-//     });
-
-//   } catch (error) {
-//     console.log('Error in register ' + error);
-//     res.status(500).send(error);
-//   }
-// };
-
 async function createStripePaymentIntent(email, name) {
   const customer = await stripe.customers.create({
     email,
@@ -1861,46 +1325,6 @@ async function createStripePaymentIntent(email, name) {
     paymentIntentId: paymentIntent.id
   };
 }
-
-
-// export const createPaymentIntent = async (req, res) => {
-//   const { email, name } = req.body;
-
-//   try {
-//     const customer = await stripe.customers.create({
-//       email: email,
-//       name: name,
-//       metadata: { temp_user_email: email }
-//     });
-
-//     const paymentIntent = await stripe.paymentIntents.create({
-//       amount: 100,
-//       currency: 'eur',
-//       customer: customer.id,
-//       automatic_payment_methods: {
-//         enabled: true,
-//       },
-//       metadata: {
-//         customer_email: email,
-//         purpose: 'account_verification'
-//       }
-//     });
-
-//     res.status(200).json({
-//       clientSecret: paymentIntent.client_secret,
-//       customerId: customer.id,
-//       paymentIntentId: paymentIntent.id
-//     });
-
-//   } catch (error) {
-//     console.error('Erreur création payment intent:', error);
-//     res.status(500).json({
-//       error: 'Erreur lors de la création du paiement',
-//       details: error.message
-//     });
-//   }
-// };
-
 
 export const verifyCode = async (req, res) => {
   try {
@@ -2128,103 +1552,6 @@ const sendVerificationConfirmationEmail = async (email, fullName, userType) => {
   console.log(`📧 Email de confirmation envoyé à ${email} (${userType})`);
 };
 
-// export const resendOTP = async (req, res) => {
-// 	const { email } = req.body;
-	
-// 	try {
-// 	  const usa = await User.findOne({ email });
-// 	  // console.log("usz",user)
-// 	  if (!usa) {
-// 		return res.status(404).json({ message: "L'utilisateur n'existe pas" });
-// 	  }
-  
-// 	  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-// 	  const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
-	  
-// 	  usa.otp = otp;
-// 	  usa.otpExpires = otpExpires;
-	  
-// 	  await usa.save();
-// 	   await transporter.sendMail({
-//       from: "diasporatogocontact@gmail.com",
-//       to: email,
-//       subject: "Vérifiez votre compte",
-//       text: `Votre code est ${otp}. Il expire dans 10 minutes.`,
-//     });
-
-// 	  res.status(200).json({ 
-// 		message: 'Un nouveau code de vérification a été envoyé à votre email.' 
-// 	  });
-// 	} catch (error) {
-// 	  console.error('Error resending OTP:', error);
-// 	  res.status(500).json({ 
-// 		error: error.message || 'Erreur interne du serveur' 
-// 	  });
-// 	}
-//   }
-
-// export const verifyPayment = async (req, res) => {
-//   const { paymentIntentId, email, customerId } = req.body;
-
-//   try {
-//     // VÉRIFIER LE VRAI STATUT STRIPE
-//     const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
-
-//     if (paymentIntent.status === 'succeeded') {
-//       let userData = await user.findOne({ email });
-
-//       if (userData) {
-//         userData.stripeCustomerId = customerId;
-//         userData.paymentVerified = true;
-//         userData.paymentIntentId = paymentIntentId;
-//         await userData.save();
-
-//         const otp = otpGenerator.generate(5, { 
-//           digits: true, 
-//           alphabets: false, 
-//           specialChars: false 
-//         });
-//         const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
-
-//         userData.otp = otp;
-//         userData.otpExpires = otpExpires;
-//         await userData.save();
-
-//         await transporter.sendMail({
-//           from: "support@diasporatogo.com",
-//           to: email,
-//           subject: "Vérifiez votre compte - Code OTP",
-//           text: `Votre code de vérification est ${otp}. Il expire dans 10 minutes.`,
-//         });
-
-//         return res.status(200).json({
-//           success: true,
-//           message: "Paiement vérifié et OTP envoyé",
-//           paymentStatus: 'succeeded'
-//         });
-//       } else {
-//         return res.status(404).json({
-//           success: false,
-//           message: "Utilisateur non trouvé"
-//         });
-//       }
-//     } else {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Paiement non réussi",
-//         paymentStatus: paymentIntent.status
-//       });
-//     }
-
-//   } catch (error) {
-//     console.error('Error verifying payment:', error);
-//     res.status(500).json({ 
-//       error: 'Erreur lors de la vérification du paiement',
-//       details: error.message 
-//     });
-//   }
-// };
-
 
 export const register = async (req, res) => {
   try {
@@ -2237,6 +1564,8 @@ export const register = async (req, res) => {
       // Champs pour Entreprise
       companyName,
       businessDomain,
+      website,
+      cfe,
       // Champs communs
       email,
       password,
@@ -2290,6 +1619,18 @@ export const register = async (req, res) => {
           message: 'Le domaine d\'activité est requis'
         });
       }
+      if (!website || website.trim() === '') {
+        return res.status(400).json({
+          success: false,
+          message: 'Le site web est requis'
+        });
+      }
+      if (!cfe || cfe.trim() === '') {
+        return res.status(400).json({
+          success: false,
+          message: 'Le CFE est requis'
+        });
+      }
     }
 
     // 1. Vérifier si l'email existe déjà
@@ -2301,34 +1642,59 @@ export const register = async (req, res) => {
       });
     }
 
-    // 2. Préparer les données utilisateur
+    // 2. Vérifier l'unicité du CFE pour les entreprises
+    if (userType === 'Entreprise' && cfe && cfe.trim() !== '') {
+      const existingCfe = await User.findOne({ cfe: cfe.toUpperCase() });
+      if (existingCfe) {
+        return res.status(400).json({
+          success: false,
+          message: 'Un compte avec ce CFE existe déjà'
+        });
+      }
+    }
+
+    // 3. Préparer les données utilisateur
     const userData = {
       userType,
       email: email.toLowerCase(),
       password,
       phoneNumber,
-      country,
-      city,
       acceptTerms,
       marketingOptIn: marketingOptIn || false
     };
 
-    // 3. Ajouter les champs spécifiques au type
+    // 4. Ajouter les champs optionnels seulement s'ils sont fournis
+    if (country && country.trim() !== '') userData.country = country.trim();
+    if (city && city.trim() !== '') userData.city = city.trim();
+
+    // 5. Ajouter les champs spécifiques au type
     if (userType === 'Particulier') {
-      Object.assign(userData, {
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        userName: userName ? userName.toLowerCase().trim() : undefined
-      });
+      userData.firstName = firstName.trim();
+      userData.lastName = lastName.trim();
+      
+      // Pour les particuliers, website et cfe doivent être undefined
+      userData.website = undefined;
+      userData.cfe = undefined;
+      
+      if (userName && userName.trim() !== '') {
+        userData.userName = userName.toLowerCase().trim();
+      }
     } else {
-      Object.assign(userData, {
-        companyName: companyName.trim(),
-        businessDomain: businessDomain.trim(),
-        userName: userName ? userName.toLowerCase().trim() : undefined
-      });
+      userData.companyName = companyName.trim();
+      userData.businessDomain = businessDomain.trim();
+      userData.website = website.trim();
+      userData.cfe = cfe.toUpperCase().trim();
+      
+      // Pour les entreprises, firstName, lastName et userName peuvent être undefined
+      userData.firstName = undefined;
+      userData.lastName = undefined;
+      
+      if (userName && userName.trim() !== '') {
+        userData.userName = userName.toLowerCase().trim();
+      }
     }
 
-    // 4. Vérifier l'unicité du userName si fourni
+    // 6. Vérifier l'unicité du userName si fourni
     if (userData.userName && userData.userName.trim() !== '') {
       const existingUserName = await User.findOne({ 
         userName: userData.userName.toLowerCase().trim() 
@@ -2341,58 +1707,54 @@ export const register = async (req, res) => {
       }
     }
 
-    // 5. Déterminer le statut selon le type d'utilisateur
+    // 7. Déterminer le statut selon le type d'utilisateur
     const isParticulier = userData.userType === 'Particulier';
     
-    // 6. Ajouter les champs de statut
+    // 8. Ajouter les champs de statut (TOUS les utilisateurs commencent comme non vérifiés)
     Object.assign(userData, {
-      isActive: isParticulier,
-      isVerified: isParticulier,
+      isActive: false, // Désactivé jusqu'à vérification OTP
+      isVerified: false, // Non vérifié par défaut
       paymentStatus: isParticulier ? 'completed' : 'pending',
       amountPaid: isParticulier ? 0 : 5
     });
 
-    // 7. Créer l'utilisateur
+    // 9. Créer l'utilisateur
     const user = await User.create(userData);
 
-    // 8. Réponse selon le type d'utilisateur
-    if (isParticulier) {
-      // CAS PARTICULIER
-      const token = jwt.sign(
-        { 
-          userId: user._id,
-          email: user.email,
-          role: user.role,
-          userType: user.userType,
-          isVerified: user.isVerified,
-          isActive: user.isActive
-        }, 
-        process.env.SECRET,
-        { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-      );
+    // 10. Générer un code OTP pour TOUS les utilisateurs
+    const verificationCode = user.generateVerificationCode();
+    await user.save();
 
+    // 11. Envoyer l'email de vérification OTP pour TOUS les utilisateurs
+    try {
+      await sendVerificationEmail(
+        user.email, 
+        verificationCode, 
+        isParticulier ? `${user.firstName} ${user.lastName}` : user.companyName
+      );
+    } catch (emailError) {
+      console.error('Erreur envoi email OTP:', emailError.message);
+      // Continuer même si l'email échoue
+    }
+
+    // 12. Réponse selon le type d'utilisateur
+    if (isParticulier) {
+      // CAS PARTICULIER - PLUS DE TOKEN, REDIRECTION VERS OTP
       return res.status(201).json({
         success: true,
-        message: 'Inscription réussie. Compte activé.',
+        message: 'Inscription réussie ! Vérifiez votre email pour le code OTP.',
         data: {
           userId: user._id.toString(),
           email: user.email,
-          token: token,
-          requiresPayment: false,
-          user: {
-            id: user._id,
-            firstName: user.firstName,
-            lastName: user.lastName,
-            userName: user.userName,
-            email: user.email,
-            userType: user.userType,
-            isVerified: user.isVerified,
-            isActive: user.isActive
-          }
+          requiresOTP: true, // Indique que l'OTP est requis
+          userType: user.userType,
+          debugCode: process.env.NODE_ENV === 'development' ? verificationCode : undefined,
+          redirectUrl: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/auth/verify`,
+          otpExpiresIn: '10 minutes'
         }
       });
     } else {
-      // CAS ENTREPRISE
+      // CAS ENTREPRISE - PAIEMENT REQUIS
       if (!process.env.STRIPE_SECRET_KEY) {
         return res.status(500).json({
           success: false,
@@ -2416,6 +1778,8 @@ export const register = async (req, res) => {
           email: user.email,
           userName: user.userName,
           companyName: user.companyName,
+          website: user.website,
+          cfe: user.cfe,
           stripeCustomerId: customer.id,
           paymentIntentId: paymentIntent.id,
           clientSecret: paymentIntent.client_secret,
@@ -2448,6 +1812,8 @@ export const register = async (req, res) => {
         message = 'Un compte avec cet email existe déjà';
       } else if (field === 'userName') {
         message = 'Ce nom d\'utilisateur est déjà pris';
+      } else if (field === 'cfe') {
+        message = 'Un compte avec ce CFE existe déjà';
       }
       
       return res.status(400).json({
