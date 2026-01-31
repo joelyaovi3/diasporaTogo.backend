@@ -1,4 +1,4 @@
-// server.js ou app.js - Version améliorée
+// server.js ou app.js - Version corrigée
 import express from 'express';
 import dotenv from 'dotenv/config';
 import mongoDBConnect from './mongoDB/connection.js';
@@ -14,146 +14,73 @@ import chatRoutes from './routes/chat.js';
 import { configureSocket } from './config/socketConfig.js';
 import http from 'http';
 
-class Server {
-  constructor() {
-    this.app = express();
-    this.server = http.createServer(this.app);
-    this.io = null;
-    this.port = process.env.PORT || 8003;
-    
-    this.initializeMiddlewares();
-    this.initializeRoutes();
-    this.initializeDatabase();
-    this.initializeSocket();
-  }
+const app = express();
 
-  initializeMiddlewares() {
-    const allowedOrigins = [
-      'http://localhost:3000',
-      'https://diasporatogo-teal.vercel.app',
-      'https://diasporatogo.com',
-    ];
+const allowedOrigins = [
+  'http://localhost:3000',
+  'https://diasporatogo-teal.vercel.app',
+  'https://diasporatogo.com',
+];
 
-    const corsOptions = {
-      origin: function (origin, callback) {
-        if (allowedOrigins.indexOf(origin) !== -1 || !origin) {
-          callback(null, true);
-        } else {
-          callback(new Error('Not allowed by CORS'));
-        }
-      },
-      credentials: true,
-      exposedHeaders: ["Set-Cookie"]
-    };
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (allowedOrigins.indexOf(origin) !== -1 || !origin) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  exposedHeaders: ["Set-Cookie"]
+};
 
-    this.app.use(cors(corsOptions));
-    this.app.use(cookieParser());
-    this.app.use(express.static('public'));
-    this.app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
-    this.app.use(bodyParser.json());
-    this.app.use(bodyParser.urlencoded({ extended: true }));
+app.use(cors(corsOptions));
+app.use(cookieParser());
+app.use(express.static('public'));
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
-    // Middleware pour injecter io dans les requêtes après son initialisation
-    this.app.use((req, res, next) => {
-      if (this.io) {
-        req.io = this.io;
-      }
-      next();
-    });
-  }
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
 
-  initializeRoutes() {
-    // Routes de base
-    this.app.get('/', (req, res) => {
-      res.send('Hello!');
-    });
+app.get('/', (req, res) => {
+  res.send('Hello!');
+});
 
-    this.app.get('/api', (req, res) => {
-      res.json({ message: 'This is an API endpoint' });
-    });
+app.get('/api', (req, res) => {
+  res.json({ message: 'This is an API endpoint' });
+});
 
-    // Routes d'API
-    this.app.use('/api', userRoutes);
-    this.app.use('/api/news', newsRoutes);
-    this.app.use('/api/admin/news', newsValidation);
-    this.app.use('/api/chat', chatRoutes);
-  }
+app.use('/api', userRoutes);
+app.use('/api/news', newsRoutes);
+app.use('/api/admin/news', newsValidation);
+app.use('/api/chat', chatRoutes);
 
-  initializeDatabase() {
-    mongoose.set('strictQuery', false);
-    mongoDBConnect();
-  }
+mongoose.set('strictQuery', false);
+mongoDBConnect();
 
-  initializeSocket() {
-    this.io = configureSocket(this.server);
-    this.app.set('io', this.io);
-  }
+const PORT = process.env.PORT || 8003;
 
-  start() {
-    return new Promise((resolve, reject) => {
-      this.server.listen(this.port, () => {
-        console.log(`🚀 Serveur démarré sur le port ${this.port}`);
-        console.log(`🔌 Socket.IO actif`);
-        resolve({ app: this.app, server: this.server, io: this.io });
-      });
+// Créer le serveur HTTP
+const server = http.createServer(app);
 
-      this.server.on('error', (error) => {
-        console.error('❌ Erreur du serveur:', error);
-        reject(error);
-      });
-    });
-  }
+// Configurer Socket.IO
+const io = configureSocket(server);
 
-  // Méthodes pour obtenir les instances
-  getApp() {
-    return this.app;
-  }
+// Ajouter io à l'objet app pour l'utiliser dans les routes
+app.set('io', io);
 
-  getIo() {
-    return this.io;
-  }
+// Middleware pour injecter io dans les requêtes
+app.use((req, res, next) => {
+  req.io = io;
+  next();
+});
 
-  getServer() {
-    return this.server;
-  }
+server.listen(PORT, () => {
+  console.log(`🚀 Serveur démarré sur le port ${PORT}`);
+  console.log(`🔌 Socket.IO actif`)
+});
 
-  stop() {
-    return new Promise((resolve, reject) => {
-      if (this.io) {
-        this.io.close();
-      }
-      
-      this.server.close((error) => {
-        if (error) {
-          console.error('❌ Erreur lors de l\'arrêt du serveur:', error);
-          reject(error);
-        } else {
-          console.log('✅ Serveur arrêté proprement');
-          resolve();
-        }
-      });
-    });
-  }
-}
-
-// Création et démarrage du serveur
-const serverInstance = new Server();
-
-// Pour le démarrage immédiat si ce fichier est exécuté directement
-if (import.meta.url === `file://${process.argv[1]}`) {
-  serverInstance.start()
-    .then(() => {
-      console.log('✅ Application démarrée avec succès');
-    })
-    .catch((error) => {
-      console.error('❌ Erreur lors du démarrage:', error);
-      process.exit(1);
-    });
-}
-
-// Exportations pour les tests et autres utilisations
-export { serverInstance };
-export const app = serverInstance.getApp();
-export const io = serverInstance.getIo();
-export const server = serverInstance.getServer();
-export default serverInstance;
+// Exporter pour les tests
+// export {app, io}
+// export { app };
+export default app;
