@@ -3,35 +3,61 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 
 const userSchema = new mongoose.Schema({
+  // Champs communs
+  userType: {
+    type: String,
+    enum: ['Entreprise', 'Particulier'],
+    default: 'Particulier'
+  },
+  
+  // Champs pour Particulier
   firstName: {
     type: String,
-    required: [true, 'Le prénom est requis']
+    required: function() {
+      return this.userType === 'Particulier';
+    },
+    default: null
   },
   lastName: {
     type: String,
-    required: [true, 'Le nom est requis']
+    required: function() {
+      return this.userType === 'Particulier';
+    },
+    default: null
   },
-  username: {
+  userName: { // Note: j'ai changé username en userName pour correspondre au frontend
     type: String,
-    required: [true, 'Le nom d\'utilisateur est requis'],
-    // unique: true,
+    required: function() {
+      return this.userType === 'Particulier';
+    },
     trim: true,
-    lowercase: true, // Optionnel: uniformiser la casse
-    index: true, // Ajouter explicitement
-    sparse: true, // 
-    default: null // 
+    lowercase: true,
+    default: null
   },
+  
+  // Champs pour Entreprise
+  companyName: {
+    type: String,
+    required: function() {
+      return this.userType === 'Entreprise';
+    },
+    default: null
+  },
+  businessDomain: {
+    type: String,
+    required: function() {
+      return this.userType === 'Entreprise';
+    },
+    default: null
+  },
+  
+  // Champs communs
   email: {
     type: String,
     required: [true, 'L\'email est requis'],
     unique: true,
     lowercase: true,
     match: [/^\S+@\S+\.\S+$/, 'Email invalide']
-  },
-  role: { 
-      type: String, 
-      default: 'Users', 
-      enum: ['Users','Support','admin','Moderator', 'Supervisor']
   },
   password: {
     type: String,
@@ -43,13 +69,13 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Le téléphone est requis']
   },
-  profession: String,
   country: String,
   city: String,
-  userType: {
-    type: String,
-    enum: ['Entreprise', 'Particulier'],
-    default: 'Particulier'
+  
+  role: { 
+    type: String, 
+    default: 'Users', 
+    enum: ['Users','Support','admin','Moderator', 'Supervisor']
   },
   
   // État du compte
@@ -111,6 +137,16 @@ const userSchema = new mongoose.Schema({
   marketingOptIn: {
     type: Boolean,
     default: false
+  },
+  
+  // Timestamps
+  createdAt: {
+    type: Date,
+    default: Date.now
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now
   }
 }, {
   timestamps: true,
@@ -118,54 +154,71 @@ const userSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
-// Remplacer les deux middleware pre('save') par un seul
+// Middleware pre-save modifié
 userSchema.pre('save', async function(next) {
   const user = this;
   
-  // Étape 1: S'assurer qu'il y a toujours un username
-  if (!user.username || user.username.trim() === '') {
-    // Générer un username basé sur l'email
-    const baseUsername = user.email ? user.email.split('@')[0] : 'user';
-    const cleanUsername = baseUsername.replace(/[^a-z0-9]/g, '');
-    const finalUsername = cleanUsername || 'user';
-    user.username = `${finalUsername}${Math.floor(Math.random() * 1000)}`;
-  }
+  // Mettre à jour updatedAt
+  this.updatedAt = Date.now();
   
-  // Nettoyer et formater le username
-  user.username = user.username.toLowerCase().trim();
-  
-  // Étape 2: Vérifier l'unicité
-  if (user.isModified('username')) {
-    try {
-      let attempts = 0;
-      let isUnique = false;
-      
-      while (!isUnique && attempts < 5) {
-        const existingUser = await mongoose.model('User').findOne({
-          username: user.username,
-          _id: { $ne: user._id }
-        });
+  // Gestion du nom d'utilisateur selon le type
+  if (user.userType === 'Particulier') {
+    // Pour les particuliers, utiliser userName
+    if (!user.userName || user.userName.trim() === '') {
+      // Générer un userName basé sur l'email
+      const baseUserName = user.email ? user.email.split('@')[0] : 'user';
+      const cleanUserName = baseUserName.replace(/[^a-z0-9]/g, '');
+      const finalUserName = cleanUserName || 'user';
+      user.userName = `${finalUserName}${Math.floor(Math.random() * 1000)}`;
+    }
+    
+    // Nettoyer et formater le userName
+    user.userName = user.userName.toLowerCase().trim();
+    
+    // Vérifier l'unicité du userName pour les particuliers
+    if (user.isModified('userName')) {
+      try {
+        let attempts = 0;
+        let isUnique = false;
         
-        if (!existingUser) {
-          isUnique = true;
-        } else {
-          // Générer un nouveau username
-          const randomSuffix = Math.floor(Math.random() * 90000) + 10000;
-          user.username = user.username.replace(/\d+$/, '') + randomSuffix;
-          attempts++;
+        while (!isUnique && attempts < 5) {
+          const existingUser = await mongoose.model('User').findOne({
+            userName: user.userName,
+            _id: { $ne: user._id }
+          });
+          
+          if (!existingUser) {
+            isUnique = true;
+          } else {
+            const randomSuffix = Math.floor(Math.random() * 90000) + 10000;
+            user.userName = user.userName.replace(/\d+$/, '') + randomSuffix;
+            attempts++;
+          }
         }
+        
+        if (!isUnique) {
+          user.userName = `${user.userName}_${Date.now()}`;
+        }
+      } catch (err) {
+        return next(err);
       }
-      
-      if (!isUnique) {
-        // En dernier recours, utiliser un timestamp
-        user.username = `${user.username}_${Date.now()}`;
-      }
-    } catch (err) {
-      return next(err);
     }
   }
   
-  // Étape 3: Hasher le mot de passe
+  // Pour les entreprises, on pourrait générer un nom d'utilisateur basé sur le nom de l'entreprise
+  if (user.userType === 'Entreprise' && (!user.userName || user.userName.trim() === '')) {
+    if (user.companyName) {
+      const cleanCompanyName = user.companyName
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '')
+        .substring(0, 15);
+      user.userName = `${cleanCompanyName}${Math.floor(Math.random() * 1000)}`;
+    } else {
+      user.userName = `company${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    }
+  }
+  
+  // Hasher le mot de passe
   if (!user.isModified('password')) return next();
   
   try {
@@ -175,6 +228,46 @@ userSchema.pre('save', async function(next) {
   } catch (error) {
     next(error);
   }
+});
+
+// Middleware pre-validate modifié
+userSchema.pre('validate', function(next) {
+  // Générer un userName si vide selon le type
+  if (!this.userName || this.userName.trim() === '') {
+    if (this.userType === 'Particulier') {
+      if (this.email) {
+        const baseUserName = this.email.split('@')[0]
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, '')
+          .substring(0, 20);
+        
+        if (baseUserName && baseUserName.length > 0) {
+          this.userName = `${baseUserName}${Math.floor(Math.random() * 1000)}`;
+        } else {
+          this.userName = `user${Math.floor(Math.random() * 9000 + 1000)}`;
+        }
+      } else {
+        this.userName = `user${Date.now()}${Math.floor(Math.random() * 1000)}`;
+      }
+    } else if (this.userType === 'Entreprise') {
+      if (this.companyName) {
+        const cleanCompanyName = this.companyName
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, '')
+          .substring(0, 15);
+        this.userName = `${cleanCompanyName}${Math.floor(Math.random() * 1000)}`;
+      } else {
+        this.userName = `company${Date.now()}${Math.floor(Math.random() * 1000)}`;
+      }
+    }
+  }
+  
+  // Trim et lowercase pour userName
+  if (this.userName) {
+    this.userName = this.userName.toLowerCase().trim();
+  }
+  
+  next();
 });
 // Méthodes d'instance
 userSchema.methods.comparePassword = async function(candidatePassword) {
@@ -269,36 +362,6 @@ userSchema.virtual('isPaymentRequired').get(function() {
 // Dans userSchema, après les virtuals existants
 userSchema.virtual('requiresPayment').get(function() {
   return this.userType !== 'Particulier'; // Paiement pour Company et Freelance
-});
-
-// AJOUTEZ CE MIDDLEWARE AVANT LE pre('save')
-userSchema.pre('validate', function(next) {
-  // Générer un username si vide ou null
-  if (!this.username || this.username.trim() === '') {
-    if (this.email) {
-      const baseUsername = this.email.split('@')[0]
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, '') // Enlever caractères spéciaux
-        .substring(0, 20); // Limiter la longueur
-      
-      // S'assurer qu'on a au moins quelque chose
-      if (baseUsername && baseUsername.length > 0) {
-        this.username = `${baseUsername}${Math.floor(Math.random() * 1000)}`;
-      } else {
-        this.username = `user${Math.floor(Math.random() * 9000 + 1000)}`;
-      }
-    } else {
-      // Fallback si pas d'email (ne devrait pas arriver avec validation)
-      this.username = `user${Date.now()}${Math.floor(Math.random() * 1000)}`;
-    }
-  }
-  
-  // Trim et lowercase
-  if (this.username) {
-    this.username = this.username.toLowerCase().trim();
-  }
-  
-  next();
 });
 
 const User = mongoose.model('User', userSchema);

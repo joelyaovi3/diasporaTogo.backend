@@ -2229,16 +2229,20 @@ const sendVerificationConfirmationEmail = async (email, fullName, userType) => {
 export const register = async (req, res) => {
   try {
     const {
+      userType,
+      // Champs pour Particulier
       firstName,
       lastName,
-      username,
+      userName,
+      // Champs pour Entreprise
+      companyName,
+      businessDomain,
+      // Champs communs
       email,
       password,
       phoneNumber,
-      profession,
       country,
       city,
-      userType,
       acceptTerms,
       marketingOptIn
     } = req.body;
@@ -2249,6 +2253,43 @@ export const register = async (req, res) => {
         success: false,
         message: 'Vous devez accepter les conditions d\'utilisation'
       });
+    }
+
+    // Validation du type d'utilisateur
+    if (!userType || !['Entreprise', 'Particulier'].includes(userType)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Type d\'utilisateur invalide'
+      });
+    }
+
+    // Validation des champs selon le type
+    if (userType === 'Particulier') {
+      if (!firstName || firstName.trim() === '') {
+        return res.status(400).json({
+          success: false,
+          message: 'Le prénom est requis'
+        });
+      }
+      if (!lastName || lastName.trim() === '') {
+        return res.status(400).json({
+          success: false,
+          message: 'Le nom est requis'
+        });
+      }
+    } else if (userType === 'Entreprise') {
+      if (!companyName || companyName.trim() === '') {
+        return res.status(400).json({
+          success: false,
+          message: 'Le nom de la société est requis'
+        });
+      }
+      if (!businessDomain || businessDomain.trim() === '') {
+        return res.status(400).json({
+          success: false,
+          message: 'Le domaine d\'activité est requis'
+        });
+      }
     }
 
     // 1. Vérifier si l'email existe déjà
@@ -2262,50 +2303,61 @@ export const register = async (req, res) => {
 
     // 2. Préparer les données utilisateur
     const userData = {
-      firstName,
-      lastName,
+      userType,
       email: email.toLowerCase(),
       password,
       phoneNumber,
-      profession,
       country,
       city,
-      userType: userType || 'Particulier',
       acceptTerms,
-      marketingOptIn
+      marketingOptIn: marketingOptIn || false
     };
 
-    // 3. Gérer le username (optionnel - le middleware le générera si vide)
-    if (username && username.trim() !== '') {
-      // Vérifier l'unicité du username fourni
-      const existingUsername = await User.findOne({ 
-        username: username.toLowerCase().trim() 
+    // 3. Ajouter les champs spécifiques au type
+    if (userType === 'Particulier') {
+      Object.assign(userData, {
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        userName: userName ? userName.toLowerCase().trim() : undefined
       });
-      if (existingUsername) {
+    } else {
+      Object.assign(userData, {
+        companyName: companyName.trim(),
+        businessDomain: businessDomain.trim(),
+        userName: userName ? userName.toLowerCase().trim() : undefined
+      });
+    }
+
+    // 4. Vérifier l'unicité du userName si fourni
+    if (userData.userName && userData.userName.trim() !== '') {
+      const existingUserName = await User.findOne({ 
+        userName: userData.userName.toLowerCase().trim() 
+      });
+      if (existingUserName) {
         return res.status(400).json({
           success: false,
           message: 'Ce nom d\'utilisateur est déjà pris'
         });
       }
-      userData.username = username.toLowerCase().trim();
     }
-    // Si pas de username fourni, le middleware pre('validate') le générera automatiquement
 
-    // 4. Déterminer le statut selon le type d'utilisateur
+    // 5. Déterminer le statut selon le type d'utilisateur
     const isParticulier = userData.userType === 'Particulier';
     
-    // 5. Ajouter les champs de statut
+    // 6. Ajouter les champs de statut
     Object.assign(userData, {
-      isActive: isParticulier, // Actif immédiatement pour Particulier
-      isVerified: isParticulier, // Vérifié immédiatement pour Particulier
-      paymentStatus: isParticulier ? 'completed' : 'pending'
+      isActive: isParticulier,
+      isVerified: isParticulier,
+      paymentStatus: isParticulier ? 'completed' : 'pending',
+      amountPaid: isParticulier ? 0 : 5
     });
 
-    // 6. Créer l'utilisateur
+    // 7. Créer l'utilisateur
     const user = await User.create(userData);
 
-   if (isParticulier) {
-      // 🔹 CAS PARTICULIER
+    // 8. Réponse selon le type d'utilisateur
+    if (isParticulier) {
+      // CAS PARTICULIER
       const token = jwt.sign(
         { 
           userId: user._id,
@@ -2331,7 +2383,7 @@ export const register = async (req, res) => {
             id: user._id,
             firstName: user.firstName,
             lastName: user.lastName,
-            username: user.username,
+            userName: user.userName,
             email: user.email,
             userType: user.userType,
             isVerified: user.isVerified,
@@ -2340,8 +2392,7 @@ export const register = async (req, res) => {
         }
       });
     } else {
-      // 🔹 CAS ENTREPRISE
-      // Vérifier que Stripe est configuré
+      // CAS ENTREPRISE
       if (!process.env.STRIPE_SECRET_KEY) {
         return res.status(500).json({
           success: false,
@@ -2349,7 +2400,6 @@ export const register = async (req, res) => {
         });
       }
 
-      // Utiliser le service Stripe
       const customer = await stripeService.createCustomer(user);
       const paymentIntent = await stripeService.createPaymentIntent(customer.id, user);
 
@@ -2364,7 +2414,8 @@ export const register = async (req, res) => {
         data: {
           userId: user._id.toString(),
           email: user.email,
-          username: user.username,
+          userName: user.userName,
+          companyName: user.companyName,
           stripeCustomerId: customer.id,
           paymentIntentId: paymentIntent.id,
           clientSecret: paymentIntent.client_secret,
@@ -2391,11 +2442,17 @@ export const register = async (req, res) => {
     
     if (error.code === 11000) {
       const field = Object.keys(error.keyPattern)[0];
+      let message = 'Une erreur est survenue';
+      
+      if (field === 'email') {
+        message = 'Un compte avec cet email existe déjà';
+      } else if (field === 'userName') {
+        message = 'Ce nom d\'utilisateur est déjà pris';
+      }
+      
       return res.status(400).json({
         success: false,
-        message: field === 'email' 
-          ? 'Un compte avec cet email existe déjà' 
-          : 'Ce nom d\'utilisateur est déjà pris',
+        message: message,
         code: 'DUPLICATE_KEY'
       });
     }
