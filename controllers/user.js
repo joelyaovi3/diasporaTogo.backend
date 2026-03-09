@@ -1673,8 +1673,8 @@ export const register = async (req, res) => {
       userData.lastName = lastName.trim();
       
       // Pour les particuliers, website et cfe doivent être undefined
-      userData.website = undefined;
-      userData.cfe = undefined;
+      // userData.website = undefined; on ne setter pas un null ou undefined
+      // userData.cfe = undefined;
       
       if (userName && userName.trim() !== '') {
         userData.userName = userName.toLowerCase().trim();

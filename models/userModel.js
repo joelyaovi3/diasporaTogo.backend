@@ -52,7 +52,7 @@ const userSchema = new mongoose.Schema({
   },
    website: {
     type: String,
-    default: null,
+    // default: null,
     trim: true,
     sparse: true,
     index: true,
@@ -75,7 +75,7 @@ const userSchema = new mongoose.Schema({
   
   cfe: {
     type: String,
-    default: null,
+    // default: null,
     trim: true,
     uppercase: true,
     sparse: true,
