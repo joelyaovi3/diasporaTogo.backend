@@ -22,7 +22,7 @@ export const sendVerificationEmail = async (email, code, name) => {
         </div>
         
         <div style="padding: 30px; background-color: #f9f9f9;">
-          <h2 style="color: #333;">Bonjour ${name},</h2>
+          <h2 style="color: #333;">Bonjour,</h2>
           
           <p style="color: #666; line-height: 1.6;">
             Votre paiement a été confirmé avec succès. Pour finaliser la création de votre compte, 
@@ -50,7 +50,7 @@ export const sendVerificationEmail = async (email, code, name) => {
           
           <p style="color: #666;">
             Cordialement,<br>
-            L'équipe ${process.env.APP_NAME}
+            L'équipe DiasporaTogo
           </p>
         </div>
         
