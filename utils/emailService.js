@@ -74,7 +74,7 @@ export const sendWelcomeEmail = async (email, name) => {
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <div style="background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); padding: 30px; text-align: center;">
-          <h1 style="color: white; margin: 0;">Bienvenue ${name} ! 🎉</h1>
+          <h1 style="color: white; margin: 0;">Bienvenue ! 🎉</h1>
         </div>
         
         <div style="padding: 30px; background-color: #f9f9f9;">
@@ -85,14 +85,6 @@ export const sendWelcomeEmail = async (email, name) => {
             de notre plateforme.
           </p>
           
-          <div style="text-align: center; margin: 40px 0;">
-            <a href="${process.env.FRONTEND_URL}/dashboard" 
-               style="background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); 
-                      color: white; padding: 15px 30px; text-decoration: none; 
-                      border-radius: 5px; font-weight: bold; display: inline-block;">
-              Accéder à mon tableau de bord
-            </a>
-          </div>
           
           <div style="background-color: #e8f5e9; border-left: 4px solid #4CAF50; padding: 15px; margin: 20px 0;">
             <p style="margin: 0; color: #2e7d32;">
@@ -109,7 +101,7 @@ export const sendWelcomeEmail = async (email, name) => {
           
           <p style="color: #666;">
             Bienvenue à bord !<br>
-            L'équipe ${process.env.APP_NAME}
+            L'équipe DiasporaTogo
           </p>
         </div>
       </div>
