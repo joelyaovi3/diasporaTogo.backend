@@ -13,6 +13,8 @@ import { sendVerificationEmail, sendWelcomeEmail } from '../utils/emailService.j
 import stripeService from '../utils/stripe.js';
 // import Stripe from 'stripe';
 
+const ALLOWED_ROLES = ['Users', 'Support', 'admin', 'Moderator', 'Supervisor'];
+
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com', 
   port: 465, 
@@ -159,47 +161,47 @@ export const login = async (req, res) => {
 };
 
 
-export const updateUserRole = async (req, res) => {
-  const { userId, newRole } = req.body;
+// export const updateUserRole = async (req, res) => {
+//   const { userId, newRole } = req.body;
   
-  try {
-    const user = await User.findById(userId);
+//   try {
+//     const user = await User.findById(userId);
     
-    if (!user) {
-      return res.status(404).json({ message: "Utilisateur non trouvé" });
-    }
+//     if (!user) {
+//       return res.status(404).json({ message: "Utilisateur non trouvé" });
+//     }
     
-    // Vérifier si le nouveau rôle est valide
-    const validRoles = ['User', 'Individual', 'Company', 'Freelancer', 'Support', 'Admin', 'Moderator', 'Supervisor'];
-    if (!validRoles.includes(newRole)) {
-      return res.status(400).json({ 
-        message: "Rôle invalide",
-        validRoles 
-      });
-    }
+//     // Vérifier si le nouveau rôle est valide
+//     const validRoles = ['User', 'Individual', 'Company', 'Freelancer', 'Support', 'Admin', 'Moderator', 'Supervisor'];
+//     if (!validRoles.includes(newRole)) {
+//       return res.status(400).json({ 
+//         message: "Rôle invalide",
+//         validRoles 
+//       });
+//     }
     
-    // Mettre à jour le rôle
-    user.role = newRole;
-    await user.save();
+//     // Mettre à jour le rôle
+//     user.role = newRole;
+//     await user.save();
     
-    res.status(200).json({
-      message: "Rôle mis à jour avec succès",
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        typeUser: user.typeUser
-      }
-    });
+//     res.status(200).json({
+//       message: "Rôle mis à jour avec succès",
+//       user: {
+//         id: user._id,
+//         name: user.name,
+//         email: user.email,
+//         role: user.role,
+//         typeUser: user.typeUser
+//       }
+//     });
     
-  } catch (error) {
-    console.error('Erreur lors de la mise à jour du rôle:', error);
-    res.status(500).json({ 
-      message: "Erreur lors de la mise à jour du rôle" 
-    });
-  }
-};
+//   } catch (error) {
+//     console.error('Erreur lors de la mise à jour du rôle:', error);
+//     res.status(500).json({ 
+//       message: "Erreur lors de la mise à jour du rôle" 
+//     });
+//   }
+// };
 
 
 const cleanupExpiredUnverifiedAccounts = async () => {
@@ -989,21 +991,243 @@ export const getUserById = async (req, res) => {
   }
 };
 
+// export const updateInfo = async (req, res) => {
+//   const { id } = req.params;
+//   const { bio, username } = req.body;
+//   const updatedUser = await User.findByIdAndUpdate(id, { username, bio });
+//   return updatedUser;
+// };
+
 export const updateInfo = async (req, res) => {
-  const { id } = req.params;
-  const { bio, username } = req.body;
-  const updatedUser = await User.findByIdAndUpdate(id, { username, bio });
-  return updatedUser;
+  try {
+    const { id } = req.params;
+ 
+    // ── 1. Sécurité : un utilisateur ne peut modifier que son propre profil ──
+    //    (sauf admin — adaptez selon votre logique)
+    if (req.user._id.toString() !== id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Vous ne pouvez modifier que votre propre profil.',
+      });
+    }
+ 
+    // ── 2. Champs autorisés — email et role JAMAIS modifiables ici ──────────
+    const ALLOWED_FIELDS = [
+      'firstName', 'lastName', 'userName',
+      'companyName', 'businessDomain', 'website',
+      'phoneNumber', 'country', 'city', 'bio',
+    ];
+ 
+    // Construire l'objet update en filtrant uniquement les champs autorisés
+    const updates = {};
+    for (const field of ALLOWED_FIELDS) {
+      if (req.body[field] !== undefined) {
+        updates[field] = req.body[field];
+      }
+    }
+ 
+    // ── 3. Vérification qu'il y a au moins un champ à modifier ───────────────
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Aucun champ valide fourni pour la mise à jour.',
+      });
+    }
+ 
+    updates.updatedAt = new Date();
+ 
+    // ── 4. Mise à jour ────────────────────────────────────────────────────────
+    const updatedUser = await User.findByIdAndUpdate(
+      id,
+      { $set: updates },
+      {
+        new: true,           // retourne le document mis à jour
+        runValidators: true, // exécute les validateurs Mongoose
+      }
+    ).select('-password -verificationCode -verificationCodeExpires -revokedTokens');
+ 
+    if (!updatedUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'Utilisateur introuvable.',
+      });
+    }
+ 
+    // ── 5. Réponse ─────────────────────────────────────────────────────────
+    return res.status(200).json({
+      success: true,
+      message: 'Profil mis à jour avec succès.',
+      data: updatedUser,
+    });
+  } catch (error) {
+    console.error('[updateInfo]', error);
+ 
+    // Erreur de validation Mongoose
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map((e) => e.message);
+      return res.status(400).json({
+        success: false,
+        message: messages.join(', '),
+      });
+    }
+ 
+    // ID malformé
+    if (error.name === 'CastError') {
+      return res.status(400).json({
+        success: false,
+        message: 'ID utilisateur invalide.',
+      });
+    }
+ 
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur lors de la mise à jour du profil.',
+    });
+  }
+};
+
+// export const getUser = async (req, res) => {
+//   try {
+//     const item = await User.find();
+//     res.send(item); // Envoyer l'élément trouvé
+//   } catch (err) {
+//     res.status(500).send('Erreur lors de la récupération');
+//   }
+// }
+
+export const updateUserRole = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { role } = req.body;
+ 
+    // ── 1. Validation du body ─────────────────────────────────────────────
+    if (!role) {
+      return res.status(400).json({
+        success: false,
+        message: 'Le champ "role" est requis.',
+      });
+    }
+ 
+    if (!ALLOWED_ROLES.includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: `Rôle invalide. Valeurs acceptées : ${ALLOWED_ROLES.join(', ')}.`,
+      });
+    }
+ 
+    // ── 2. Vérification que l'admin ne se rétrograde pas lui-même ─────────
+    if (req.user && req.user._id.toString() === id) {
+      return res.status(403).json({
+        success: false,
+        message: 'Vous ne pouvez pas modifier votre propre rôle.',
+      });
+    }
+ 
+    // ── 3. Récupération de l'utilisateur cible ────────────────────────────
+    const targetUser = await User.findById(id);
+ 
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'Utilisateur introuvable.',
+      });
+    }
+ 
+    // ── 4. Mise à jour ────────────────────────────────────────────────────
+    const previousRole = targetUser.role;
+    targetUser.role = role;
+    targetUser.updatedAt = new Date();
+    await targetUser.save();
+ 
+    // ── 5. Réponse ────────────────────────────────────────────────────────
+    return res.status(200).json({
+      success: true,
+      message: `Rôle mis à jour : ${previousRole} → ${role}`,
+      data: {
+        _id: targetUser._id,
+        email: targetUser.email,
+        previousRole,
+        newRole: role,
+        updatedAt: targetUser.updatedAt,
+      },
+    });
+  } catch (error) {
+    console.error('[updateUserRole]', error);
+ 
+    // Mongoose CastError → ID malformé
+    if (error.name === 'CastError') {
+      return res.status(400).json({
+        success: false,
+        message: 'ID utilisateur invalide.',
+      });
+    }
+ 
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur lors de la mise à jour du rôle.',
+    });
+  }
 };
 
 export const getUser = async (req, res) => {
   try {
-    const item = await User.find();
-    res.send(item); // Envoyer l'élément trouvé
-  } catch (err) {
-    res.status(500).send('Erreur lors de la récupération');
+    const users = await User.find()
+      .select('-password -verificationCode -verificationCodeExpires -revokedTokens')
+      .sort({ createdAt: -1 });
+ 
+    return res.status(200).json({
+      success: true,
+      count: users.length,
+      data: users,
+    });
+  } catch (error) {
+    console.error('[getUser]', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur lors de la récupération des utilisateurs.',
+    });
   }
-}
+};
+
+export const deleteUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+ 
+    if (req.user && req.user._id.toString() === id) {
+      return res.status(403).json({
+        success: false,
+        message: 'Vous ne pouvez pas supprimer votre propre compte.',
+      });
+    }
+ 
+    const deleted = await User.findByIdAndDelete(id);
+ 
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        message: 'Utilisateur introuvable.',
+      });
+    }
+ 
+    return res.status(200).json({
+      success: true,
+      message: 'Utilisateur supprimé avec succès.',
+      data: { _id: id },
+    });
+  } catch (error) {
+    console.error('[deleteUser]', error);
+ 
+    if (error.name === 'CastError') {
+      return res.status(400).json({ success: false, message: 'ID invalide.' });
+    }
+ 
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur lors de la suppression.',
+    });
+  }
+};
+
 
 // export const updateUserRole = async (req, res) => {
 //   const { id } = req.params;
@@ -1161,23 +1385,23 @@ export const rejetUserAccount = async (req, res) => {
   }
 }
 
-export const deleteUser = async (req, res) => {
-  const { id } = req.params;
+// export const deleteUser = async (req, res) => {
+//   const { id } = req.params;
 
-  try {
-    // Find the post by ID and delete it
-    const deletedUser = await User.findByIdAndDelete(id);
+//   try {
+//     // Find the post by ID and delete it
+//     const deletedUser = await User.findByIdAndDelete(id);
 
-    if (!deletedUser) {
-      return res.status(404).json({ message: 'News not found' });
-    }
+//     if (!deletedUser) {
+//       return res.status(404).json({ message: 'News not found' });
+//     }
 
-    res.status(200).json({ message: 'Utilisateur supprimer avec succès', deletedUser });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Something went wrong' });
-  }
-}
+//     res.status(200).json({ message: 'Utilisateur supprimer avec succès', deletedUser });
+//   } catch (error) {
+//     console.error(error);
+//     res.status(500).json({ message: 'Something went wrong' });
+//   }
+// }
 
 export const forgotPassword = async (req, res) => {
   const { email } = req.body;

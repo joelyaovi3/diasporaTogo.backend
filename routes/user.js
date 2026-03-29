@@ -71,14 +71,15 @@ router.post('/auth/google', googleAuth);
 router.get('/user?', Auth, searchUsers);
 router.get('/recent', Auth, getRecentUsers);
 router.get('/users/:id', getUserById);
-router.patch('/users/update/:id', Auth, updateInfo);
 router.get("/getAllUser", Auth ,getUser);
 router.post("/create/new/user", createUser);
-router.put("/:id/role", updateUserRole);
+// router.put("/:id/role", updateUserRole);
 router.put("/update/user/id/:id", validUserAccount);
 router.put("/rejet/user/id/:id", rejetUserAccount);
 router.delete("/remove/user/:id", deleteUser);
 router.post('/forgot-password', forgotPassword);
 router.put('/reset-password/:token', resetPassword);
+router.patch('/:id/role', Auth, updateUserRole);
+router.patch('/users/update/:id', Auth, updateInfo);
 
 export default router;
