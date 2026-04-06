@@ -50,32 +50,36 @@ export const login = async (req, res) => {
     }
 
     // CORRECTION: Si l'utilisateur n'a pas de username, en créer un
-    if (!user.username || user.username.trim() === '') {
-      const baseUsername = user.email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
-      user.username = `${baseUsername || 'user'}${Math.floor(Math.random() * 1000)}`;
-      
-      // S'assurer de l'unicité
-      let isUnique = false;
-      let attempts = 0;
-      let finalUsername = user.username;
-      
-      while (!isUnique && attempts < 10) {
-        const existingUser = await User.findOne({ 
-          username: finalUsername,
-          _id: { $ne: user._id }
-        });
+      if (!user.userName || user.userName.trim() === '') {
+        const baseUserName = user.email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+        let finalUserName = `${baseUserName || 'user'}${Math.floor(Math.random() * 1000)}`;
         
-        if (!existingUser) {
-          isUnique = true;
-          user.username = finalUsername;
-        } else {
-          finalUsername = `${baseUsername || 'user'}${Math.floor(Math.random() * 9000 + 1000)}`;
-          attempts++;
+        let isUnique = false;
+        let attempts = 0;
+        
+        while (!isUnique && attempts < 10) {
+          const existingUser = await User.findOne({ 
+            userName: finalUserName,
+            _id: { $ne: user._id }
+          });
+          
+          if (!existingUser) {
+            isUnique = true;
+          } else {
+            finalUserName = `${baseUserName || 'user'}${Math.floor(Math.random() * 9000 + 1000)}`;
+            attempts++;
+          }
         }
+        
+        // Mise à jour sans déclencher la validation complète
+        await User.findByIdAndUpdate(
+          user._id,
+          { $set: { userName: finalUserName } },
+          { runValidators: false }
+        );
+        
+        user.userName = finalUserName; // Mettre à jour l'objet en mémoire aussi
       }
-      
-      await user.save();
-    }
     // Générer un token JWT
     const token = jwt.sign(
       { 
@@ -126,7 +130,7 @@ export const login = async (req, res) => {
           email: user.email,
           firstName: user.firstName,
           lastName: user.lastName,
-          username: user.username,
+          userName: user.userName,
           phoneNumber: user.phoneNumber,
           profession: user.profession,
           country: user.country,
@@ -1734,7 +1738,7 @@ export const verifyCode = async (req, res) => {
           id: user._id,
           firstName: user.firstName,
           lastName: user.lastName,
-          username: user.username,
+          userName: user.userName,
           email: user.email,
           userType: user.userType,
           isVerified: user.isVerified,
