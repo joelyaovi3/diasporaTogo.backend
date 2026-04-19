@@ -2270,9 +2270,22 @@ export const verifyPayment = async (req, res) => {
     }
 
     // 5. Mettre à jour l'utilisateur
+    const plan = paymentIntent.metadata?.subscriptionPlan || user.subscriptionPlan || 'monthly';
+    const now = new Date();
+    const endDate = new Date(now);
+    if (plan === 'annual') {
+      endDate.setFullYear(endDate.getFullYear() + 1);
+    } else {
+      endDate.setMonth(endDate.getMonth() + 1);
+    }
+
     user.paymentStatus = 'completed';
-    user.paymentDate = new Date();
+    user.paymentDate = now;
     user.amountPaid = paymentIntent.amount / 100;
+    user.subscriptionPlan = plan;
+    user.subscriptionStatus = 'active';
+    user.subscriptionStartDate = now;
+    user.subscriptionEndDate = endDate;
     user.isActive = true;
 
     const verificationCode = user.generateVerificationCode();
@@ -2352,6 +2365,45 @@ export const verifyPayment = async (req, res) => {
 };
 
 
+
+// Sélection / changement de plan d'abonnement entreprise
+export const selectSubscriptionPlan = async (req, res) => {
+  try {
+    const { email, paymentIntentId, plan } = req.body;
+
+    if (!email || !paymentIntentId || !plan) {
+      return res.status(400).json({ success: false, message: 'email, paymentIntentId et plan sont requis' });
+    }
+
+    if (!['monthly', 'annual'].includes(plan)) {
+      return res.status(400).json({ success: false, message: 'Plan invalide. Choisissez monthly ou annual.' });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase().trim(), paymentIntentId });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Utilisateur introuvable' });
+    }
+
+    const updatedIntent = await stripeService.updatePaymentIntentPlan(paymentIntentId, plan);
+
+    user.subscriptionPlan = plan;
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `Plan ${plan === 'annual' ? 'annuel ($55/an)' : 'mensuel ($5/mois)'} sélectionné`,
+      data: {
+        plan,
+        amount: updatedIntent.amount / 100,
+        currency: updatedIntent.currency,
+        clientSecret: updatedIntent.client_secret,
+      }
+    });
+  } catch (error) {
+    console.error('Erreur selectSubscriptionPlan:', error.message);
+    res.status(500).json({ success: false, message: 'Erreur lors de la sélection du plan', detail: error.message });
+  }
+};
 
 // Renvoyer l'OTP
 export const resendOTP = async (req, res) => {

@@ -61,21 +61,38 @@ class StripeService {
     });
   }
 
-  async createPaymentIntent(customerId, user) {
+  getPlanAmount(plan) {
+    return plan === 'annual' ? 5500 : 500; // $55 annuel ou $5 mensuel (en centimes)
+  }
+
+  async createPaymentIntent(customerId, user, plan = 'monthly') {
+    const amount = this.getPlanAmount(plan);
+    const planLabel = plan === 'annual' ? 'Annuel ($55/an)' : 'Mensuel ($5/mois)';
+
     return await this.stripe.paymentIntents.create({
-      amount: 500,
-      currency: 'eur',
+      amount,
+      currency: 'usd',
       customer: customerId,
       metadata: {
         userId: user._id.toString(),
         email: user.email,
         userType: user.userType,
-        purpose: 'account_verification'
+        subscriptionPlan: plan,
+        purpose: 'enterprise_subscription'
       },
-      description: `Vérification compte ${user.userType} - ${user.username}`,
+      description: `Abonnement Entreprise ${planLabel} - ${user.companyName || user.email}`,
       automatic_payment_methods: {
         enabled: true,
       },
+    });
+  }
+
+  async updatePaymentIntentPlan(paymentIntentId, plan) {
+    const amount = this.getPlanAmount(plan);
+    return await this.stripe.paymentIntents.update(paymentIntentId, {
+      amount,
+      currency: 'usd',
+      metadata: { subscriptionPlan: plan },
     });
   }
 

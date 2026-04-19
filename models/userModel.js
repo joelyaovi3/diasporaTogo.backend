@@ -134,7 +134,7 @@ const userSchema = new mongoose.Schema({
     default: false
   },
   
-  // Paiement
+  // Paiement & Abonnement
   stripeCustomerId: String,
   paymentStatus: {
     type: String,
@@ -142,9 +142,21 @@ const userSchema = new mongoose.Schema({
     default: 'pending'
   },
   paymentIntentId: String,
+  subscriptionPlan: {
+    type: String,
+    enum: ['monthly', 'annual'],
+    default: 'monthly'
+  },
+  subscriptionStatus: {
+    type: String,
+    enum: ['inactive', 'active', 'cancelled', 'expired'],
+    default: 'inactive'
+  },
+  subscriptionStartDate: Date,
+  subscriptionEndDate: Date,
   amountPaid: {
     type: Number,
-    default: 5 // €
+    default: 5
   },
   paymentDate: Date,
   

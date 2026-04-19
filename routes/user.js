@@ -19,8 +19,9 @@ import {
   forgotPassword,
   resetPassword,
   verifyCode,
-  // createPaymentIntent,      
-  verifyPayment,  
+  // createPaymentIntent,
+  verifyPayment,
+  selectSubscriptionPlan,
   resendOTP,
   refreshToken,
   checkSession,
@@ -37,7 +38,8 @@ router.use(express.json());
 
 // Routes d'authentification avec Stripe
 router.post('/auth/register', register);
-router.post('/auth/verify-payment', verifyPayment);   
+router.post('/auth/verify-payment', verifyPayment);
+router.post('/auth/select-plan', selectSubscriptionPlan);
 router.post('/auth/login', login);
 // router.post('/create-payment-intent', createPaymentIntent); // Étape 2: Paiement
 router.post('/auth/verify-otp', verifyCode);
