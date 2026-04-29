@@ -7,12 +7,34 @@ import Conversation from '../models/conversationModel.js';
 import Message from '../models/messageModel.js';
 
 export const configureSocket = (server) => {
+  const socketAllowedOrigins = [
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:3002',
+    'https://diasporatogo-teal.vercel.app',
+    'https://diasporatogo.com',
+    'https://www.diasporatogo.com',
+  ];
+
+  if (process.env.CLIENT_URL) {
+    socketAllowedOrigins.push(process.env.CLIENT_URL);
+  }
+
   const io = new Server(server, {
     cors: {
-      origin: process.env.NODE_ENV === 'production' 
-        ? process.env.CLIENT_URL 
-        : 'http://localhost:3000',
-      credentials: true
+      origin: function (origin, callback) {
+        if (
+          !origin ||
+          socketAllowedOrigins.includes(origin) ||
+          /^https:\/\/diasporatogo[\w-]*\.vercel\.app$/.test(origin)
+        ) {
+          callback(null, true);
+        } else {
+          callback(new Error('Not allowed by CORS'));
+        }
+      },
+      credentials: true,
+      methods: ['GET', 'POST'],
     },
     transports: ['websocket', 'polling'],
     pingTimeout: 30000,
