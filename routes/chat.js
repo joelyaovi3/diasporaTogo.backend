@@ -1,11 +1,12 @@
 // routes/chatRoutes.js
 import express from 'express';
 import { Auth } from '../middleware/user.js';
-import { 
-  invitationController, 
-  conversationController, 
-  messageController 
+import {
+  invitationController,
+  conversationController,
+  messageController
 } from '../controllers/chatControllers.js';
+import { blockController } from '../controllers/blockController.js';
 import { uploadChatFiles } from '../middleware/cloudinaryChat.js';
 
 const router = express.Router();
@@ -32,5 +33,10 @@ router.post('/messages',
 router.get('/conversations/:conversationId/messages', Auth, messageController.getMessages);
 router.delete('/messages/:messageId', Auth, messageController.deleteMessage);
 router.post('/conversations/:conversationId/read', Auth, messageController.markAsRead);
+
+// Routes pour le blocage
+router.post('/users/:userId/block', Auth, blockController.blockUser);
+router.delete('/users/:userId/block', Auth, blockController.unblockUser);
+router.get('/users/blocked', Auth, blockController.getBlockedUsers);
 
 export default router;

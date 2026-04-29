@@ -158,7 +158,7 @@ const NewsSchema = new mongoose.Schema({
     },
     category: {
       type: String,
-      enum: ['moderation', 'edit', 'info', 'warning', 'other'],
+      enum: ['moderation', 'edit', 'info', 'warning', 'other', 'rejection', 'block', 'unblock'],
       default: 'other'
     }
   }],

@@ -61,7 +61,7 @@ export const configureSocket = (server) => {
   // Émettre un événement de bienvenue
   
   io.on('connection', (socket) => {
-    console.log(`✅ Socket connecté: ${socket.userId} (${socket.user.username})`);
+    console.log(`✅ Socket connecté: ${socket.userId} (${socket.user.userName})`);
     
     // Rejoindre la room personnelle
     socket.join(`user:${socket.userId}`);
@@ -80,7 +80,7 @@ export const configureSocket = (server) => {
       // Notifier les autres participants
       socket.to(`conversation:${conversationId}`).emit('user-joined-conversation', {
         userId: socket.userId,
-        username: socket.user.username
+        username: socket.user.userName
       });
     });
 
@@ -252,7 +252,7 @@ socket.on('send-message', async (data) => {
       
       socket.to(`conversation:${conversationId}`).emit('user-typing', {
         userId: socket.userId,
-        username: socket.user.username,
+        username: socket.user.userName,
         isTyping,
         conversationId
       });

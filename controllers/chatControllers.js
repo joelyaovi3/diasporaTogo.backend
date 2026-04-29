@@ -3,7 +3,11 @@ import Invitation from '../models/invitationModel.js';
 import Conversation from '../models/conversationModel.js';
 import Message from '../models/messageModel.js';
 import User from '../models/userModel.js';
+import Block from '../models/blockModel.js';
 import { deleteCloudinaryFile } from '../middleware/cloudinaryChat.js';
+import { createAndEmitNotification } from './notificationController.js';
+
+const INVITATION_DAILY_LIMIT = 20;
 
 // Contrôleur pour les invitations
 export const invitationController = {
@@ -66,22 +70,50 @@ sendInvitation: async (req, res) => {
       });
     }
 
-    // Vérifier si une invitation existe déjà
+    // Vérifier si l'un a bloqué l'autre
+    const blocked = await Block.isBlocked(senderId, receiverId);
+    if (blocked) {
+      return res.status(403).json({
+        success: false,
+        error: 'Vous ne pouvez pas envoyer d\'invitation à cet utilisateur'
+      });
+    }
+
+    // Rate limiting : max INVITATION_DAILY_LIMIT invitations par 24h
+    const recentCount = await Invitation.countRecentSent(senderId);
+    if (recentCount >= INVITATION_DAILY_LIMIT) {
+      return res.status(429).json({
+        success: false,
+        error: `Vous avez atteint la limite de ${INVITATION_DAILY_LIMIT} invitations par jour`
+      });
+    }
+
+    // Vérifier si une conversation active existe déjà entre les deux utilisateurs
+    const existingConversation = await Conversation.findOne({
+      participants: { $all: [senderId, receiverId] },
+      isActive: true
+    });
+
+    if (existingConversation) {
+      return res.status(400).json({
+        success: false,
+        error: 'Vous discutez déjà avec cet utilisateur',
+        conversationId: existingConversation._id
+      });
+    }
+
+    // Vérifier si une invitation est déjà en attente
     const existingInvitation = await Invitation.findOne({
       $or: [
-        { sender: senderId, receiver: receiverId, status: { $in: ['pending', 'accepted'] } },
-        { sender: receiverId, receiver: senderId, status: { $in: ['pending', 'accepted'] } }
+        { sender: senderId, receiver: receiverId, status: 'pending' },
+        { sender: receiverId, receiver: senderId, status: 'pending' }
       ]
     });
 
     if (existingInvitation) {
-      const errorMessage = existingInvitation.status === 'pending' 
-        ? 'Une invitation est déjà en attente' 
-        : 'Vous avez déjà une conversation active avec cet utilisateur';
-      
       return res.status(400).json({
         success: false,
-        error: errorMessage,
+        error: 'Une invitation est déjà en attente',
         existingInvitation: {
           id: existingInvitation._id,
           status: existingInvitation.status
@@ -125,7 +157,7 @@ sendInvitation: async (req, res) => {
         _id: populatedSender._id,
         firstName: populatedSender.firstName,
         lastName: populatedSender.lastName,
-        username: populatedSender.username,
+        userName: populatedSender.userName,
         email: populatedSender.email,
         avatar: populatedSender.avatar
       },
@@ -133,7 +165,7 @@ sendInvitation: async (req, res) => {
         _id: populatedReceiver._id,
         firstName: populatedReceiver.firstName,
         lastName: populatedReceiver.lastName,
-        username: populatedReceiver.username,
+        userName: populatedReceiver.userName,
         email: populatedReceiver.email,
         avatar: populatedReceiver.avatar
       },
@@ -152,24 +184,25 @@ sendInvitation: async (req, res) => {
       invitation: responseInvitation
     });
 
-    // Émettre un événement Socket.IO au destinataire
+    // Notification persistante + Socket.IO au destinataire
+    await createAndEmitNotification(req.io, {
+      recipient: receiverId,
+      type: 'invitation_received',
+      refModel: 'Invitation',
+      refId: invitation._id,
+      data: {
+        sender: {
+          _id: responseInvitation.sender._id,
+          firstName: responseInvitation.sender.firstName,
+          lastName: responseInvitation.sender.lastName,
+          avatar: responseInvitation.sender.avatar
+        },
+        message: invitation.message
+      }
+    });
+
     if (req.io) {
-      const socketData = {
-        _id: invitation._id,
-        sender: responseInvitation.sender,
-        receiver: responseInvitation.receiver,
-        status: invitation.status,
-        message: invitation.message,
-        createdAt: invitation.createdAt
-      };
-
-      console.log('DEBUG emit socket:', {
-        to: receiverId.toString(),
-        event: 'new-invitation',
-        data: socketData
-      });
-
-      req.io.to(receiverId.toString()).emit('new-invitation', socketData);
+      req.io.to(receiverId.toString()).emit('new-invitation', responseInvitation);
     }
 
   } catch (error) {
@@ -260,27 +293,34 @@ sendInvitation: async (req, res) => {
         conversation
       });
 
-      // Émettre des événements Socket.IO
       if (req.io) {
-        // Au destinataire (celui qui a accepté)
-        req.io.to(userId.toString()).emit('invitation-accepted', {
-          invitationId: invitation._id,
-          conversation
-        });
-
-        // À l'expéditeur
+        req.io.to(userId.toString()).emit('invitation-accepted', { invitationId: invitation._id, conversation });
         req.io.to(invitation.sender._id.toString()).emit('invitation-accepted', {
           invitationId: invitation._id,
           conversation,
           acceptedBy: invitation.receiver
         });
-
-        // Notifier les deux parties de la nouvelle conversation
-        const participants = [invitation.sender._id.toString(), invitation.receiver._id.toString()];
-        participants.forEach(participantId => {
-          req.io.to(participantId).emit('new-conversation', conversation);
+        [invitation.sender._id.toString(), invitation.receiver._id.toString()].forEach(pid => {
+          req.io.to(pid).emit('new-conversation', conversation);
         });
       }
+
+      // Notification persistante à l'expéditeur
+      await createAndEmitNotification(req.io, {
+        recipient: invitation.sender._id,
+        type: 'invitation_accepted',
+        refModel: 'Invitation',
+        refId: invitation._id,
+        data: {
+          acceptedBy: {
+            _id: invitation.receiver._id,
+            firstName: invitation.receiver.firstName,
+            lastName: invitation.receiver.lastName,
+            avatar: invitation.receiver.avatar
+          },
+          conversationId: conversation._id
+        }
+      });
 
     } catch (error) {
       console.error('Erreur acceptation invitation:', error);

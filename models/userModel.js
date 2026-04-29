@@ -197,6 +197,16 @@ const userSchema = new mongoose.Schema({
     default: false
   },
   
+  // Présence en ligne
+  isOnline: {
+    type: Boolean,
+    default: false
+  },
+  lastSeen: {
+    type: Date,
+    default: null
+  },
+
   // Timestamps
   createdAt: {
     type: Date,

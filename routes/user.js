@@ -31,6 +31,7 @@ import {
   getRecentUsers,
 } from '../controllers/user.js'; 
 import { Auth } from '../middleware/user.js';
+import { notificationController } from '../controllers/notificationController.js';
 
 const router = express.Router();
 
@@ -83,5 +84,10 @@ router.post('/forgot-password', forgotPassword);
 router.put('/reset-password/:token', resetPassword);
 router.patch('/:id/role', Auth, updateUserRole);
 router.patch('/users/update/:id', Auth, updateInfo);
+
+// Routes notifications
+router.get('/notifications', Auth, notificationController.getNotifications);
+router.put('/notifications/mark-read', Auth, notificationController.markAsRead);
+router.delete('/notifications/:notificationId', Auth, notificationController.deleteNotification);
 
 export default router;

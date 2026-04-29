@@ -1,6 +1,8 @@
 import News from '../models/NewsModel.js';
+import User from '../models/userModel.js';
 import { deleteOldImage } from '../middleware/cloudinaryMiddleware.js';
 import mongoose from 'mongoose';
+import { createAndEmitNotification } from './notificationController.js';
 
 // @desc    Créer une nouvelle news
 // @route   POST /api/news
@@ -56,13 +58,43 @@ export const createNews = async (req, res) => {
     
     res.status(201).json({
       success: true,
-      data: responseData, // Utilisez cette option
+      data: responseData,
       message: 'News créée avec succès'
     });
-    
+
+    // Notifier les admins/modérateurs/superviseurs (bloc isolé — n'affecte pas la réponse)
+    try {
+      const io = req.app.get('io');
+      const staffUsers = await User.find({
+        role: { $in: ['admin', 'Moderator', 'Supervisor'] }
+      }).select('_id');
+
+      console.log(`📢 Envoi notification news_submitted à ${staffUsers.length} staff(s)`);
+
+      await Promise.all(
+        staffUsers.map(staff =>
+          createAndEmitNotification(io, {
+            recipient: staff._id,
+            type: 'news_submitted',
+            refModel: 'News',
+            refId: savedNews._id,
+            data: {
+              newsId: savedNews._id,
+              newsTitle: savedNews.title,
+              authorId: req.rootUserId,
+              authorName: req.rootUser.userName || req.rootUser.firstName,
+            }
+          })
+        )
+      );
+    } catch (notifError) {
+      console.error('Erreur envoi notifications news_submitted:', notifError);
+    }
+
   } catch (error) {
     console.error('Erreur création news:', error);
-    
+    if (res.headersSent) return;
+
     if (error.name === 'ValidationError') {
       const messages = Object.values(error.errors).map(val => val.message);
       return res.status(400).json({
@@ -70,7 +102,7 @@ export const createNews = async (req, res) => {
         message: messages.join(', ')
       });
     }
-    
+
     res.status(500).json({
       success: false,
       message: 'Erreur serveur lors de la création'

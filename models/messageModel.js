@@ -41,7 +41,16 @@ const messageSchema = new mongoose.Schema({
   deliveredAt: {
     type: Date,
     default: Date.now
-  }
+  },
+  isEdited: {
+    type: Boolean,
+    default: false
+  },
+  // Historique limité aux 5 dernières versions pour garder une trace sans surcharger
+  editHistory: [{
+    content: String,
+    editedAt: { type: Date, default: Date.now }
+  }]
 }, {
   timestamps: true
 });

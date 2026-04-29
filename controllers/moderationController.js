@@ -1,6 +1,7 @@
 import News from '../models/NewsModel.js';
 import User from '../models/userModel.js';
 import mongoose from 'mongoose';
+import { createAndEmitNotification } from './notificationController.js';
 
 // @desc    Récupérer toutes les news en attente de modération
 // @route   GET /api/admin/news/pending
@@ -242,9 +243,6 @@ export const approveNews = async (req, res) => {
 
     await news.save();
 
-    // Notifier l'auteur (vous pouvez implémenter un système de notification)
-    // await notifyAuthor(news.author, 'Votre news a été approuvée', note);
-
     // Populer les données pour la réponse
     const populatedNews = await News.findById(id)
       .populate('author', 'username email')
@@ -254,6 +252,20 @@ export const approveNews = async (req, res) => {
       success: true,
       data: populatedNews,
       message: 'News approuvée avec succès'
+    });
+
+    // Notifier l'auteur
+    const io = req.app.get('io');
+    await createAndEmitNotification(io, {
+      recipient: news.author,
+      type: 'news_accepted',
+      refModel: 'News',
+      refId: news._id,
+      data: {
+        newsId: news._id,
+        newsTitle: news.title,
+        ...(note && { moderatorNote: note })
+      }
     });
   } catch (error) {
     console.error('Erreur approbation news:', error);
@@ -320,13 +332,25 @@ export const rejectNews = async (req, res) => {
 
     await news.save();
 
-    // Notifier l'auteur
-    // await notifyAuthor(news.author, 'Votre news a été refusée', moderationNote);
-
     res.json({
       success: true,
       data: news,
       message: 'News refusée avec succès'
+    });
+
+    // Notifier l'auteur
+    const io = req.app.get('io');
+    await createAndEmitNotification(io, {
+      recipient: news.author,
+      type: 'news_declined',
+      refModel: 'News',
+      refId: news._id,
+      data: {
+        newsId: news._id,
+        newsTitle: news.title,
+        reason,
+        ...(note && { moderatorNote: note })
+      }
     });
   } catch (error) {
     console.error('Erreur rejet news:', error);
@@ -424,6 +448,22 @@ export const blockNews = async (req, res) => {
       success: true,
       data: news,
       message: 'News bloquée avec succès'
+    });
+
+    // Notifier l'auteur
+    const io = req.app.get('io');
+    await createAndEmitNotification(io, {
+      recipient: news.author,
+      type: 'news_blocked',
+      refModel: 'News',
+      refId: news._id,
+      data: {
+        newsId: news._id,
+        newsTitle: news.title,
+        reason,
+        ...(blockUntil && { blockUntil }),
+        ...(note && { moderatorNote: note })
+      }
     });
   } catch (error) {
     console.error('Erreur blocage news:', error);
