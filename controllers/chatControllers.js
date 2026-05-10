@@ -1,10 +1,12 @@
 // controllers/chatController.js
+import path from 'path';
 import Invitation from '../models/invitationModel.js';
 import Conversation from '../models/conversationModel.js';
 import Message from '../models/messageModel.js';
 import User from '../models/userModel.js';
 import Block from '../models/blockModel.js';
 import { deleteCloudinaryFile } from '../middleware/cloudinaryChat.js';
+import { cloudinary } from '../utils/cloudinary.js';
 import { createAndEmitNotification } from './notificationController.js';
 
 const INVITATION_DAILY_LIMIT = 20;
@@ -53,7 +55,7 @@ sendInvitation: async (req, res) => {
 
     // Vérifier que le destinataire existe
     const receiver = await User.findById(receiverId)
-      .select('firstName lastName username email avatar isActive isVerified');
+      .select('firstName lastName username userName userType companyName email avatar isActive isVerified');
     
     if (!receiver) {
       return res.status(404).json({
@@ -71,12 +73,12 @@ sendInvitation: async (req, res) => {
     }
 
     // Vérifier si l'un a bloqué l'autre
-    const blocked = await Block.isBlocked(senderId, receiverId);
-    if (blocked) {
-      return res.status(403).json({
-        success: false,
-        error: 'Vous ne pouvez pas envoyer d\'invitation à cet utilisateur'
-      });
+    const blockDirection = await Block.getBlockDirection(senderId, receiverId);
+    if (blockDirection) {
+      const error = blockDirection === 'blocker'
+        ? 'Vous avez bloqué cet utilisateur. Débloquez-le d\'abord pour pouvoir l\'inviter.'
+        : 'Vous ne pouvez pas envoyer d\'invitation à cet utilisateur.';
+      return res.status(403).json({ success: false, error });
     }
 
     // Rate limiting : max INVITATION_DAILY_LIMIT invitations par 24h
@@ -137,13 +139,13 @@ sendInvitation: async (req, res) => {
     // Si on veut les données complètes, on peut les récupérer
     if (!populatedSender.avatar || !populatedSender.firstName) {
       populatedSender = await User.findById(senderId)
-        .select('firstName lastName username email avatar')
+        .select('firstName lastName username userName userType companyName email avatar')
         .lean();
     }
 
     if (!populatedReceiver.avatar || !populatedReceiver.firstName) {
       populatedReceiver = await User.findById(receiverId)
-        .select('firstName lastName username email avatar')
+        .select('firstName lastName username userName userType companyName email avatar')
         .lean();
     }
 
@@ -238,8 +240,8 @@ sendInvitation: async (req, res) => {
       const userId = req.user._id;
 
       const invitation = await Invitation.findById(invitationId)
-        .populate('sender', 'firstName lastName username email avatar')
-        .populate('receiver', 'firstName lastName username email avatar');
+        .populate('sender', 'firstName lastName username userName userType companyName email avatar')
+        .populate('receiver', 'firstName lastName username userName userType companyName email avatar');
 
       if (!invitation) {
         return res.status(404).json({
@@ -285,7 +287,7 @@ sendInvitation: async (req, res) => {
       });
 
       // Populer les informations
-      await conversation.populate('participants', 'firstName lastName username email avatar');
+      await conversation.populate('participants', 'firstName lastName username userName userType companyName email avatar');
 
       res.status(200).json({
         success: true,
@@ -439,7 +441,7 @@ sendInvitation: async (req, res) => {
         receiver: userId,
         status: status
       })
-        .populate('sender', 'firstName lastName username email avatar')
+        .populate('sender', 'firstName lastName username userName userType companyName email avatar')
         .sort({ createdAt: -1 });
 
       res.status(200).json({
@@ -467,7 +469,7 @@ sendInvitation: async (req, res) => {
         sender: userId,
         status: status
       })
-        .populate('receiver', 'firstName lastName username email avatar')
+        .populate('receiver', 'firstName lastName username userName userType companyName email avatar')
         .sort({ createdAt: -1 });
 
       res.status(200).json({
@@ -497,7 +499,7 @@ export const conversationController = {
         participants: userId,
         isActive: true
       })
-        .populate('participants', 'firstName lastName username email avatar')
+        .populate('participants', 'firstName lastName username userName userType companyName email avatar')
         .populate('lastMessage')
         .sort({ updatedAt: -1 });
 
@@ -543,7 +545,7 @@ export const conversationController = {
         participants: userId,
         isActive: true
       })
-        .populate('participants', 'firstName lastName username email avatar')
+        .populate('participants', 'firstName lastName username userName userType companyName email avatar')
         .populate('invitation');
 
       if (!conversation) {
@@ -631,7 +633,8 @@ sendMessage: async (req, res) => {
       if (files.length > 0) {
         files.forEach(async (file) => {
           try {
-            await deleteCloudinaryFile(file.filename);
+            const resourceType = file.mimetype?.startsWith('image/') ? 'image' : 'raw';
+            await deleteCloudinaryFile(file.filename, resourceType);
           } catch (error) {
             console.error('Erreur suppression fichier:', error);
           }
@@ -655,7 +658,8 @@ sendMessage: async (req, res) => {
       if (files.length > 0) {
         files.forEach(async (file) => {
           try {
-            await deleteCloudinaryFile(file.filename);
+            const resourceType = file.mimetype?.startsWith('image/') ? 'image' : 'raw';
+            await deleteCloudinaryFile(file.filename, resourceType);
           } catch (error) {
             console.error('Erreur suppression fichier:', error);
           }
@@ -691,7 +695,7 @@ sendMessage: async (req, res) => {
     await conversation.save();
 
     // Populer les informations de l'expéditeur
-    await message.populate('sender', 'firstName lastName username email avatar');
+    await message.populate('sender', 'firstName lastName username userName userType companyName email avatar');
 
     // Émettre l'événement Socket.IO
     if (req.io) {
@@ -744,7 +748,8 @@ sendMessage: async (req, res) => {
     if (req.files && req.files.length > 0) {
       req.files.forEach(async (file) => {
         try {
-          await deleteCloudinaryFile(file.filename);
+          const resourceType = file.mimetype?.startsWith('image/') ? 'image' : 'raw';
+          await deleteCloudinaryFile(file.filename, resourceType);
         } catch (error) {
           console.error('Erreur suppression fichier après erreur:', error);
         }
@@ -782,7 +787,7 @@ sendMessage: async (req, res) => {
 
       // Récupérer les messages
       const messages = await Message.find({ conversation: conversationId })
-        .populate('sender', 'firstName lastName username email avatar')
+        .populate('sender', 'firstName lastName username userName userType companyName email avatar')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(parseInt(limit));
@@ -884,7 +889,8 @@ sendMessage: async (req, res) => {
         for (const attachment of message.attachments) {
           if (attachment.cloudinaryPublicId) {
             try {
-              await deleteCloudinaryFile(attachment.cloudinaryPublicId);
+              const resourceType = attachment.mimetype?.startsWith('image/') ? 'image' : 'raw';
+              await deleteCloudinaryFile(attachment.cloudinaryPublicId, resourceType);
             } catch (error) {
               console.error('Erreur suppression fichier Cloudinary:', error);
             }
@@ -994,4 +1000,99 @@ sendMessage: async (req, res) => {
       });
     }
   }
+};
+
+// ─── URL de téléchargement authentifiée Cloudinary ───────────────────────────
+// Utilise private_download_url qui génère une URL api.cloudinary.com avec
+// l'authentification dans les query params. Contourne les restrictions CDN (401).
+// Calcul purement local (HMAC) : aucun appel réseau.
+export const signAttachment = (req, res) => {
+  res.set('Cache-Control', 'no-store');
+
+  const { publicId, resourceType } = req.query;
+
+  if (!publicId) {
+    return res.status(400).json({ success: false, error: 'publicId requis' });
+  }
+
+  try {
+    const rType = resourceType === 'image' ? 'image' : 'raw';
+    const ext = path.extname(publicId).replace('.', '').toLowerCase();
+
+    // sign_url:true génère une signature HMAC dans l'URL (s--xxx--) nécessaire quand
+    // le compte Cloudinary a le mode "Signed URLs" activé (CDN retourne 401 sinon).
+    // Pour les docs Office, fl_attachment force le téléchargement au lieu d'afficher du binaire.
+    const isPDF = ext === 'pdf';
+    const downloadUrl = cloudinary.url(publicId, {
+      resource_type: rType,
+      type: 'upload',
+      sign_url: true,
+      secure: true,
+      ...(rType === 'raw' && !isPDF ? { flags: 'attachment' } : {}),
+    });
+
+    return res.json({ success: true, url: downloadUrl });
+  } catch (error) {
+    console.error('Erreur génération URL Cloudinary:', error);
+    return res.status(500).json({ success: false, error: "Impossible de générer l'URL" });
+  }
+};
+
+// Correspondance extension → Content-Type correct
+const MIME_BY_EXT = {
+  '.pdf':  'application/pdf',
+  '.doc':  'application/msword',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xls':  'application/vnd.ms-excel',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.ppt':  'application/vnd.ms-powerpoint',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+};
+
+// Proxy de fichiers :
+//  - PDF  → Content-Disposition: inline  (s'ouvre dans le viewer du navigateur)
+//  - Docs → Content-Disposition: attachment (téléchargement forcé)
+// Nécessaire car l'attribut HTML `download` est ignoré pour les URLs cross-origin,
+// et Cloudinary raw/image peut renvoyer un Content-Type incorrect.
+export const downloadController = {
+  serveFile: async (req, res) => {
+    const { url, filename, inline } = req.query;
+
+    if (!url || !url.startsWith('https://res.cloudinary.com/')) {
+      return res.status(400).json({ success: false, error: 'URL invalide' });
+    }
+    if (!filename || filename.length > 255) {
+      return res.status(400).json({ success: false, error: 'Nom de fichier invalide' });
+    }
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        return res.status(502).json({ success: false, error: 'Fichier inaccessible sur Cloudinary' });
+      }
+
+      // Forcer le bon Content-Type à partir de l'extension du fichier original
+      const ext = path.extname(filename).toLowerCase();
+      const contentType = MIME_BY_EXT[ext] || response.headers.get('content-type') || 'application/octet-stream';
+
+      // inline=1 → lecture dans le navigateur (PDF), sinon téléchargement
+      const disposition = inline === '1'
+        ? `inline; filename*=UTF-8''${encodeURIComponent(filename)}`
+        : `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`;
+
+      const buffer = await response.arrayBuffer();
+
+      res.set({
+        'Content-Type': contentType,
+        'Content-Disposition': disposition,
+        'Content-Length': buffer.byteLength,
+        'Cache-Control': 'private, max-age=3600',
+      });
+
+      res.send(Buffer.from(buffer));
+    } catch (error) {
+      console.error('Erreur proxy fichier:', error);
+      res.status(500).json({ success: false, error: 'Échec du chargement du fichier' });
+    }
+  },
 };

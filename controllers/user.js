@@ -131,10 +131,14 @@ export const login = async (req, res) => {
           firstName: user.firstName,
           lastName: user.lastName,
           userName: user.userName,
+          companyName: user.companyName,
+          businessDomain: user.businessDomain,
+          website: user.website,
           phoneNumber: user.phoneNumber,
           profession: user.profession,
           country: user.country,
           city: user.city,
+          bio: user.bio,
           role: user.role,
           userType: user.userType,
           isVerified: user.isVerified,
@@ -942,7 +946,7 @@ export const searchUsers = async (req, res) => {
 
     const users = await User.find(searchQuery)
       .find({ _id: { $ne: req.user._id } }) // Exclure l'utilisateur courant
-      .select('firstName lastName username email avatar isOnline lastSeen')
+      .select('firstName lastName username userName userType companyName email avatar isOnline lastSeen')
       .limit(10);
 
     res.status(200).json({
@@ -968,7 +972,7 @@ export const getRecentUsers = async (req, res) => {
       lastLogin: { $exists: true }
     })
       .sort({ lastLogin: -1 })
-      .select('firstName lastName username email avatar isOnline lastSeen')
+      .select('firstName lastName username userName userType companyName email avatar isOnline lastSeen')
       .limit(6);
 
     res.status(200).json({
@@ -992,6 +996,18 @@ export const getUserById = async (req, res) => {
     res.status(200).json(selectedUser);
   } catch (error) {
     res.status(500).json({ error: error });
+  }
+};
+
+export const getProfile = async (req, res) => {
+  try {
+    const profile = await User.findById(req.rootUserId).select('-password -verificationCode -verificationCodeExpires -revokedTokens');
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Utilisateur introuvable' });
+    }
+    return res.status(200).json({ success: true, data: profile });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Erreur serveur' });
   }
 };
 

@@ -262,10 +262,16 @@ const NewsSchema = new mongoose.Schema({
 // Index composés
 NewsSchema.index({ status: 1, createdAt: -1 });
 NewsSchema.index({ author: 1, createdAt: -1 });
-NewsSchema.index({ isBlocked: 1, status: 1 });
+NewsSchema.index({ isBlocked: 1, status: 1, createdAt: -1 });
+NewsSchema.index({ isBlocked: 1, status: 1, category: 1, createdAt: -1 });
 NewsSchema.index({ reportCount: -1, createdAt: -1 });
 NewsSchema.index({ commentCount: -1, createdAt: -1 });
 NewsSchema.index({ lastCommentAt: -1 });
+// Index texte pour la recherche full-text (remplace les regex)
+NewsSchema.index(
+  { title: 'text', tags: 'text', description: 'text' },
+  { weights: { title: 10, tags: 5, description: 1 }, name: 'news_text_search' }
+);
 
 // Virtual pour calculer l'engagement
 NewsSchema.virtual('engagement').get(function() {
@@ -567,15 +573,12 @@ NewsSchema.pre('save', function(next) {
 
 // Méthodes statiques
 NewsSchema.statics.findPopular = function(limit = 10) {
-  return this.find({ 
-    isBlocked: false, 
-    status: 'accepted',
-    'commentSettings.enabled': true 
-  })
-  .sort({ likes: -1, views: -1, commentCount: -1 })
-  .limit(limit)
-  .populate('author', 'username avatar')
-  .populate('latestComments');
+  return this.find({ isBlocked: false, status: 'accepted' })
+    .sort({ likes: -1, views: -1, commentCount: -1 })
+    .limit(limit)
+    .select('-internalNotes -reports -__v -comments -likedBy -dislikedBy -latestComments')
+    .populate('author', 'username avatar')
+    .lean();
 };
 
 NewsSchema.statics.findWithComments = function(newsId, page = 1, limit = 20) {

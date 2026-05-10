@@ -28,5 +28,17 @@ blockSchema.statics.isBlocked = async function(userA, userB) {
   }));
 };
 
+// Returns 'blocker' if userA blocked userB, 'blocked' if userB blocked userA, null if no block
+blockSchema.statics.getBlockDirection = async function(userA, userB) {
+  const block = await this.findOne({
+    $or: [
+      { blocker: userA, blocked: userB },
+      { blocker: userB, blocked: userA }
+    ]
+  });
+  if (!block) return null;
+  return block.blocker.toString() === userA.toString() ? 'blocker' : 'blocked';
+};
+
 const Block = mongoose.model('Block', blockSchema);
 export default Block;

@@ -9,6 +9,7 @@ import {
   updateInfo,
   getUserById,
   getUser,
+  getProfile,
   createUser,
   updateUserAvatar,
   updateUserRole,
@@ -51,6 +52,7 @@ router.post('/auth/logout', Auth, logout);
 
 // Routes existantes (gardez-les comme avant)
 router.get('/auth/valid', Auth, validUser);
+router.get('/auth/profile', Auth, getProfile);
 
 // Dans votre fichier de routes (routes/auth.js)
 router.post('/auth/refresh', Auth, refreshToken); // Rafraîchir le token

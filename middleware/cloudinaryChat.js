@@ -1,47 +1,47 @@
-// config/cloudinaryConfig.js
 import { v2 as cloudinary } from 'cloudinary';
 import { CloudinaryStorage } from 'multer-storage-cloudinary';
 import multer from 'multer';
 import path from 'path';
 
-// Configuration Cloudinary
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// Configuration spécifique pour les fichiers de chat
+// params est une fonction pour adapter resource_type et transformation selon le fichier
 const chatStorage = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: {
-    folder: 'chat-attachments',
-    allowed_formats: [
-      // Images
-      'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'svg',
-      // Documents
-      'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'rtf',
-      // Archives
-      'zip', 'rar', '7z',
-      // Audio
-      'mp3', 'wav', 'ogg', 'm4a',
-      // Vidéo
-      'mp4', 'mov', 'avi', 'mkv', 'wmv'
-    ],
-    resource_type: 'auto', // Détecte automatiquement le type
-    transformation: [
-      { quality: 'auto:good' }
-    ],
-    public_id: (req, file) => {
-      const timestamp = Date.now();
-      const userId = req.user?._id || 'anonymous';
-      const originalName = path.parse(file.originalname).name;
-      return `chat_${userId}_${timestamp}_${originalName}`;
+  cloudinary,
+  params: async (req, file) => {
+    const isImage = file.mimetype.startsWith('image/');
+    const timestamp = Date.now();
+    const userId = req.user?._id || 'anonymous';
+    const parsed = path.parse(file.originalname);
+    // Nettoyer le nom pour éviter les caractères spéciaux dans l'URL
+    const safeName = parsed.name.replace(/[^a-zA-Z0-9-_]/g, '_');
+    const ext = parsed.ext.replace('.', '').toLowerCase();
+
+    if (isImage) {
+      // Images : optimisation qualité, resource_type image
+      return {
+        folder: 'chat-attachments',
+        resource_type: 'image',
+        transformation: [{ quality: 'auto:good' }],
+        public_id: `chat_${userId}_${timestamp}_${safeName}`,
+      };
     }
-  }
+
+    // PDF, Word, Excel, PowerPoint → resource_type raw
+    // L'extension dans le public_id est indispensable pour que Cloudinary
+    // serve le bon Content-Type et que le navigateur ouvre/télécharge le bon fichier
+    return {
+      folder: 'chat-attachments',
+      resource_type: 'raw',
+      public_id: `chat_${userId}_${timestamp}_${safeName}.${ext}`,
+    };
+  },
 });
 
-// Filtrage des fichiers
 const fileFilter = (req, file, cb) => {
   const allowedTypes = [
     'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
@@ -58,6 +58,9 @@ const fileFilter = (req, file, cb) => {
     'application/x-7z-compressed',
     'audio/mpeg',
     'audio/wav',
+    'audio/webm',
+    'audio/ogg',
+    'audio/mp4',
     'video/mp4',
     'video/quicktime'
   ];
@@ -69,38 +72,32 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
-// Configuration Multer pour le chat
 export const uploadChatFiles = multer({
   storage: chatStorage,
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB max par fichier
-    files: 5 // Maximum 5 fichiers par message
+    fileSize: 10 * 1024 * 1024, // 10 Mo max par fichier
+    files: 5
   },
-  fileFilter: fileFilter
+  fileFilter,
 });
 
-// Fonction pour supprimer les fichiers Cloudinary
-export const deleteCloudinaryFile = async (publicId) => {
+export const deleteCloudinaryFile = async (publicId, resourceType = 'image') => {
   try {
-    const result = await cloudinary.uploader.destroy(publicId, {
-      resource_type: 'auto'
-    });
-    return result;
+    return await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
   } catch (error) {
     console.error('Erreur suppression Cloudinary:', error);
     throw error;
   }
 };
 
-// Fonction pour obtenir les métadonnées d'un fichier
-export const getFileInfo = (file) => {
-  return {
-    url: file.path,
-    filename: file.originalname,
-    mimetype: file.mimetype,
-    size: file.size,
-    cloudinaryPublicId: file.filename
-  };
-};
+export const getFileInfo = (file) => ({
+  url: file.path,
+  filename: file.originalname,
+  mimetype: file.mimetype,
+  size: file.size,
+  cloudinaryPublicId: file.filename,
+  // resource_type stocké pour pouvoir supprimer correctement plus tard
+  resourceType: file.mimetype.startsWith('image/') ? 'image' : 'raw',
+});
 
 export default cloudinary;

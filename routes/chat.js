@@ -4,7 +4,9 @@ import { Auth } from '../middleware/user.js';
 import {
   invitationController,
   conversationController,
-  messageController
+  messageController,
+  downloadController,
+  signAttachment
 } from '../controllers/chatControllers.js';
 import { blockController } from '../controllers/blockController.js';
 import { uploadChatFiles } from '../middleware/cloudinaryChat.js';
@@ -33,6 +35,12 @@ router.post('/messages',
 router.get('/conversations/:conversationId/messages', Auth, messageController.getMessages);
 router.delete('/messages/:messageId', Auth, messageController.deleteMessage);
 router.post('/conversations/:conversationId/read', Auth, messageController.markAsRead);
+
+// URL signée Cloudinary (calcul local, pas d'appel réseau)
+router.get('/sign-attachment', Auth, signAttachment);
+
+// Proxy fichiers : PDF (inline) et documents Office (attachment)
+router.get('/download', Auth, downloadController.serveFile);
 
 // Routes pour le blocage
 router.post('/users/:userId/block', Auth, blockController.blockUser);

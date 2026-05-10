@@ -147,14 +147,9 @@ export const getAllNews = async (req, res) => {
       filter.author = author;
     }
     
-    // Recherche optimisée
+    // Recherche via index texte MongoDB (plus rapide qu'un regex)
     if (search && search.trim()) {
-      const searchRegex = { $regex: search.trim(), $options: 'i' };
-      filter.$or = [
-        { title: searchRegex },
-        { description: searchRegex },
-        { tags: searchRegex }
-      ];
+      filter.$text = { $search: search.trim() };
     }
     
     // Tri avec validation
@@ -182,28 +177,20 @@ export const getAllNews = async (req, res) => {
           select: 'username email avatar _id',
           model: 'User'
         })
-        .select('-internalNotes -reports -__v -comments')
+        .select('-internalNotes -reports -__v -comments -likedBy -dislikedBy -latestComments')
         .sort(sort)
         .skip(skip)
         .limit(limitNum)
         .lean(),
       News.countDocuments(filter)
     ]);
-    
-    // Calcul du nombre de pages
+
     const totalPages = Math.ceil(total / limitNum);
-    
-    // Pour chaque news, récupérer les derniers commentaires séparément si nécessaire
-    // Option 1: Inclure seulement le count
-    const newsWithComments = news.map(item => ({
-      ...item,
-      // Vous pouvez ajouter d'autres données de commentaire si besoin
-      latestComments: [] // Vide ou avec des données basiques
-    }));
-    
+
+    res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
     res.json({
       success: true,
-      data: newsWithComments,
+      data: news,
       pagination: {
         total,
         page: pageNum,
@@ -281,11 +268,11 @@ export const getNewsById = async (req, res) => {
         message: 'News non trouvée'
       });
     }
-    
-    // Incrémenter le compteur de vues
-    news.views += 1;
-    await news.save();
-    
+
+    // Incrément atomique — évite de sauvegarder tout le document
+    await News.findByIdAndUpdate(id, { $inc: { views: 1 } });
+    news.views = (news.views || 0) + 1;
+
     res.json({
       success: true,
       data: news
