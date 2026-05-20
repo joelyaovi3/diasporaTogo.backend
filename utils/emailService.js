@@ -1,10 +1,15 @@
 import { Resend } from 'resend';
 
+if (!process.env.RESEND_API_KEY) {
+  console.error('❌ RESEND_API_KEY manquante — les emails ne seront pas envoyés');
+}
+
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 const FROM = process.env.EMAIL_FROM || 'DiasporaTogo <noreply@diasporatogo.com>';
 
 export const sendVerificationEmail = async (email, code, name) => {
+  console.log(`📧 Envoi OTP à ${email} depuis "${FROM}" (API key: ${process.env.RESEND_API_KEY ? 'présente' : 'ABSENTE'})`);
   const { data, error } = await resend.emails.send({
     from: FROM,
     to: [email],
@@ -58,13 +63,16 @@ export const sendVerificationEmail = async (email, code, name) => {
   });
 
   if (error) {
+    console.error('❌ Resend sendVerificationEmail error:', JSON.stringify(error));
     throw new Error(`Resend error: ${JSON.stringify(error)}`);
   }
 
+  console.log('✅ OTP envoyé, id:', data.id);
   return data;
 };
 
 export const sendWelcomeEmail = async (email, name) => {
+  console.log(`📧 Envoi bienvenue à ${email} depuis "${FROM}"`);
   const { data, error } = await resend.emails.send({
     from: FROM,
     to: [email],

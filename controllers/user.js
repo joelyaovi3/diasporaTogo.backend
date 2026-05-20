@@ -1959,29 +1959,31 @@ export const register = async (req, res) => {
     await user.save();
 
     // 11. Envoyer l'email de vérification OTP pour TOUS les utilisateurs
+    let otpEmailSent = false;
     try {
       await sendVerificationEmail(
-        user.email, 
-        verificationCode, 
+        user.email,
+        verificationCode,
         isParticulier ? `${user.firstName} ${user.lastName}` : user.companyName
       );
+      otpEmailSent = true;
     } catch (emailError) {
-      console.error('Erreur envoi email OTP:', emailError.message);
-      // Continuer même si l'email échoue
+      console.error('❌ Erreur envoi email OTP:', emailError.message);
+      console.warn(`📋 CODE OTP [${user.email}]: ${verificationCode} (email non envoyé — vérifiez le domaine Resend)`);
     }
 
     // 12. Réponse selon le type d'utilisateur
     if (isParticulier) {
-      // CAS PARTICULIER - PLUS DE TOKEN, REDIRECTION VERS OTP
       return res.status(201).json({
         success: true,
         message: 'Inscription réussie ! Vérifiez votre email pour le code OTP.',
         data: {
           userId: user._id.toString(),
           email: user.email,
-          requiresOTP: true, // Indique que l'OTP est requis
+          requiresOTP: true,
           userType: user.userType,
-          debugCode: process.env.NODE_ENV === 'development' ? verificationCode : undefined,
+          emailSent: otpEmailSent,
+          debugCode: !otpEmailSent || process.env.NODE_ENV === 'development' ? verificationCode : undefined,
           redirectUrl: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/auth/verify`,
           otpExpiresIn: '10 minutes'
         }
@@ -2442,15 +2444,23 @@ export const resendOTP = async (req, res) => {
     await user.save();
 
     // Envoyer le nouvel email
-    await sendVerificationEmail(user.email, verificationCode, user.name);
+    let emailSent = false;
+    try {
+      await sendVerificationEmail(user.email, verificationCode, user.name);
+      emailSent = true;
+    } catch (emailError) {
+      console.error('❌ Erreur envoi email OTP:', emailError.message);
+      console.warn(`📋 CODE OTP [${user.email}]: ${verificationCode} (email non envoyé — vérifiez le domaine Resend)`);
+    }
 
     res.status(200).json({
       success: true,
-      message: 'Nouveau code OTP envoyé',
+      message: emailSent ? 'Nouveau code OTP envoyé' : 'Code OTP généré (email en cours de configuration)',
       data: {
         email: user.email,
         codeExpiresIn: '10 minutes',
-        debugCode: process.env.NODE_ENV === 'development' ? verificationCode : undefined
+        emailSent,
+        debugCode: !emailSent || process.env.NODE_ENV === 'development' ? verificationCode : undefined
       }
     });
 
