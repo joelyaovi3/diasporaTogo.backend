@@ -5,7 +5,6 @@ import { cloudinary } from '../utils/cloudinary.js';
 import { sendEmail } from "../utils/sendEmail.js"
 import crypto from "crypto";
 import otpGenerator from "otp-generator"
-import nodemailer from "nodemailer";
 import jwt from "jsonwebtoken";
 //importation  du service de communication stripe
 import stripe from '../utils/stripe.js';
@@ -14,16 +13,6 @@ import stripeService from '../utils/stripe.js';
 // import Stripe from 'stripe';
 
 const ALLOWED_ROLES = ['Users', 'Support', 'admin', 'Moderator', 'Supervisor'];
-
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com', 
-  port: 465, 
-  secure: true, 
-  auth: {
-    user: 'diasporatogocontact@gmail.com',
-    pass: 'xmsaeefvcfozrqzo',
-  },
-});
 
 export const login = async (req, res) => {
   const { email, password } = req.body;
