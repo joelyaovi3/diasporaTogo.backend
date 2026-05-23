@@ -6,7 +6,8 @@ import {
   conversationController,
   messageController,
   downloadController,
-  signAttachment
+  signAttachment,
+  getRelationshipStatus,
 } from '../controllers/chatControllers.js';
 import { blockController } from '../controllers/blockController.js';
 import { uploadChatFiles } from '../middleware/cloudinaryChat.js';
@@ -42,9 +43,10 @@ router.get('/sign-attachment', Auth, signAttachment);
 // Proxy fichiers : PDF (inline) et documents Office (attachment)
 router.get('/download', Auth, downloadController.serveFile);
 
-// Routes pour le blocage
+// Routes pour le blocage et la relation
+router.get('/users/blocked', Auth, blockController.getBlockedUsers);
+router.get('/users/:userId/status', Auth, getRelationshipStatus);
 router.post('/users/:userId/block', Auth, blockController.blockUser);
 router.delete('/users/:userId/block', Auth, blockController.unblockUser);
-router.get('/users/blocked', Auth, blockController.getBlockedUsers);
 
 export default router;

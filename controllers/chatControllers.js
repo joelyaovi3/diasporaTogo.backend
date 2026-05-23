@@ -267,7 +267,7 @@ sendInvitation: async (req, res) => {
       }
 
       // Vérifier l'expiration
-      if (invitation.expiresAt < new Date()) {
+      if (invitation.pendingExpiresAt && invitation.pendingExpiresAt < new Date()) {
         invitation.status = 'expired';
         await invitation.save();
         return res.status(400).json({
@@ -1035,6 +1035,52 @@ export const signAttachment = (req, res) => {
   } catch (error) {
     console.error('Erreur génération URL Cloudinary:', error);
     return res.status(500).json({ success: false, error: "Impossible de générer l'URL" });
+  }
+};
+
+// ─── Statut de relation entre deux utilisateurs ──────────────────────────────
+export const getRelationshipStatus = async (req, res) => {
+  try {
+    const currentUserId = req.user._id;
+    const { userId: otherUserId } = req.params;
+
+    if (currentUserId.toString() === otherUserId) {
+      return res.status(400).json({ success: false, error: 'Action impossible sur soi-même' });
+    }
+
+    const [blockDirection, conversation, invitation] = await Promise.all([
+      Block.getBlockDirection(currentUserId, otherUserId),
+      Conversation.findOne({
+        participants: { $all: [currentUserId, otherUserId] },
+        isActive: true,
+      }),
+      Invitation.findOne({
+        $or: [
+          { sender: currentUserId, receiver: otherUserId },
+          { sender: otherUserId, receiver: currentUserId },
+        ],
+        status: 'pending',
+      }),
+    ]);
+
+    res.json({
+      success: true,
+      status: {
+        hasConversation: !!conversation,
+        conversationId: conversation?._id ?? null,
+        blockDirection,
+        invitation: invitation
+          ? {
+              _id: invitation._id,
+              direction: invitation.sender.toString() === currentUserId.toString() ? 'sent' : 'received',
+              status: invitation.status,
+            }
+          : null,
+      },
+    });
+  } catch (error) {
+    console.error('Erreur statut relation:', error);
+    res.status(500).json({ success: false, error: 'Erreur serveur' });
   }
 };
 
