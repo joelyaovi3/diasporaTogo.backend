@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
+import { encrypt, decrypt } from '../utils/encryption.js';
 
 const userSchema = new mongoose.Schema({
   // Champs communs
@@ -41,30 +42,40 @@ const userSchema = new mongoose.Schema({
     required: function() {
       return this.userType === 'Entreprise';
     },
-    default: null
+    default: null,
+    set: encrypt,
+    get: decrypt
   },
   businessDomain: {
     type: String,
     required: function() {
       return this.userType === 'Entreprise';
     },
-    default: null
+    default: null,
+    set: encrypt,
+    get: decrypt
   },
    website: {
     type: String,
     // default: null,
-    trim: true,
+    // Pas de `trim: true` ici : le nettoyage est fait manuellement dans le hook
+    // pre('validate') ci-dessous, car combiné à `set: encrypt` l'ordre d'application
+    // des setters intégrés (trim) vs personnalisés n'est pas garanti.
     sparse: true,
     index: true,
     required: function() {
       // Ne pas rendre required si l'utilisateur est un particulier
       return this.userType === 'Entreprise';
     },
+    set: encrypt,
+    get: decrypt,
     validate: {
       validator: function(v) {
+        // v est la valeur chiffrée stockée : on la déchiffre avant de valider le format
+        const plain = decrypt(v);
         // Si c'est une entreprise et que le champ est fourni, valider
-        if (this.userType === 'Entreprise' && v) {
-          return /^(https?:\/\/)?([a-z0-9-]+(\.[a-z0-9-]+)+)(\/.*)?$/i.test(v);
+        if (this.userType === 'Entreprise' && plain) {
+          return /^(https?:\/\/)?([a-z0-9-]+(\.[a-z0-9-]+)+)(\/.*)?$/i.test(plain);
         }
         // Pour les particuliers ou si vide, c'est OK
         return true;
@@ -113,10 +124,12 @@ const userSchema = new mongoose.Schema({
   },
   phoneNumber: {
     type: String,
-    required: [true, 'Le téléphone est requis']
+    required: [true, 'Le téléphone est requis'],
+    set: encrypt,
+    get: decrypt
   },
-  country: String,
-  city: String,
+  country: { type: String, set: encrypt, get: decrypt },
+  city: { type: String, set: encrypt, get: decrypt },
   
   role: { 
     type: String, 
@@ -220,6 +233,7 @@ const userSchema = new mongoose.Schema({
   timestamps: true,
   toJSON: {
     virtuals: true,
+    getters: true,
     transform: function(doc, ret) {
       // Supprimer champs sensibles/techniques
       delete ret.password;
@@ -230,7 +244,7 @@ const userSchema = new mongoose.Schema({
       return ret;
     }
   },
-  toObject: { virtuals: true }
+  toObject: { virtuals: true, getters: true }
 });
 
 // Middleware pre-save modifié

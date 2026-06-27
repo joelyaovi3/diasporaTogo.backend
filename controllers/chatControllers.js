@@ -137,16 +137,16 @@ sendInvitation: async (req, res) => {
     let populatedReceiver = receiver;
 
     // Si on veut les données complètes, on peut les récupérer
+    // (sans .lean() : companyName est chiffré en base, il faut garder le document
+    // Mongoose pour que le getter le déchiffre automatiquement)
     if (!populatedSender.avatar || !populatedSender.firstName) {
       populatedSender = await User.findById(senderId)
-        .select('firstName lastName username userName userType companyName email avatar')
-        .lean();
+        .select('firstName lastName username userName userType companyName email avatar');
     }
 
     if (!populatedReceiver.avatar || !populatedReceiver.firstName) {
       populatedReceiver = await User.findById(receiverId)
-        .select('firstName lastName username userName userType companyName email avatar')
-        .lean();
+        .select('firstName lastName username userName userType companyName email avatar');
     }
 
     console.log('Sender populated:', populatedSender);
